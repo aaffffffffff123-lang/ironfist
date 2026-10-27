@@ -30,9 +30,8 @@ export class UI {
     $('#btnNew').addEventListener('click', () => { if (confirm('처음부터 다시 할까요? 크레딧과 벽이 모두 사라집니다.')) this.A.newGame(); });
     this.el.sound.addEventListener('click', (e) => { e.stopPropagation(); const on = this.A.isMuted(); this.A.toggleSound(on); this.syncSound(); });
     $('#btnNext').addEventListener('click', () => {
-      // 주먹이 하나도 없으면 고철부터 달고 시작
-      if (!this.A.canStart()) for (const s of ['L', 'R']) if (!this.A.armInfo(s).fist) this.A.scrap(s);
-      if (this.A.canStart()) { this.hidePanels(); this.A.start(); } else { this.deny(); this.renderShop(); }
+      if (this.A.canStart()) this.A.start();
+      else { this.deny(); this.renderShop(); }
     });
     this.syncSound();
     $('#ctrlHint').textContent = touch ? '화면 왼쪽을 누르면 왼주먹, 오른쪽을 누르면 오른주먹' : 'F · J 키, 또는 마우스 왼쪽 · 오른쪽 클릭';
@@ -42,11 +41,22 @@ export class UI {
     const fresh = !this.hadSave || (this.G.stats.rounds === 0 && this.G.credits === 0);
     $('#btnStart').textContent = fresh ? '시작' : '이어하기';
     $('#btnNew').style.display = fresh ? 'none' : '';
+    this.el.title.inert = false;
+    this.el.title.setAttribute('aria-hidden', 'false');
     this.el.title.classList.add('show');
     this.hud(false);
     this.credits(this.G.credits, 0);
   }
-  hidePanels() { this.el.title.classList.remove('show'); this.el.shop.classList.remove('show'); }
+  hidePanels() {
+    this.el.title.classList.remove('show');
+    this.el.title.inert = true;
+    this.el.title.setAttribute('aria-hidden', 'true');
+    this.el.shop.classList.remove('show');
+    this.el.shop.inert = true;
+    this.el.shop.setAttribute('aria-hidden', 'true');
+    clearTimeout(this._ht);
+    this.el.hint.classList.remove('show', 'top');
+  }
   hud(on) {
     this.el.hud.classList.toggle('show', on);
     const w = this.WALLS.find((x) => x.id === this.G.wall);
@@ -80,42 +90,60 @@ export class UI {
     this.hud(false);
     const s = this.el.shop;
     $('#rEarned').textContent = '+' + fmt(round.earned);
+    clearTimeout(this._ht);
+    this.el.hint.classList.remove('show', 'top');
+    $('#wallPicker').open = false;
     this.renderShop();
+    s.inert = false;
+    s.setAttribute('aria-hidden', 'false');
     s.classList.add('show');
-    s.scrollTop = 0;
+    $('.shopBody').scrollTop = 0;
   }
   renderShop() {
     const G = this.G, A = this.A;
     $('#sCredits').textContent = fmt(G.credits);
-    // 팔
+    // 장착은 팔별로 직접 선택한다. 다음 판 버튼에서는 구매하지 않는다.
     const arms = $('#sArms'); arms.innerHTML = '';
     for (const side of ['L', 'R']) {
-      const info = A.armInfo(side);
-      const card = document.createElement('div'); card.className = 'arm';
-      let state;
-      if (info.fist && info.flesh) state = info.I < 0.02 ? '멀쩡함' : info.crushed ? '뭉개진 손' : info.broken ? '부러진 손' : '다친 손';
-      else if (info.scrap) state = '고철 손';
-      else if (info.I < 0.999) state = `손 없음 · 팔뚝 ${Math.round((1 - (info.I - 0.5) / 0.5) * 100)}% 남음`;
-      else state = '팔꿈치까지 없음';
+      const info = A.armInfo(side), label = side === 'L' ? '왼팔' : '오른팔';
+      const card = document.createElement('div');
+      card.className = 'arm' + (info.fist ? ' ready' : '');
+      card.dataset.side = side;
+      const state = info.scrap ? '고철 장착됨' : info.fist ? (info.I < 0.02 ? '맨손' : '다친 맨손') : '고철 없음';
       const rp = A.restorePrice(), sp = A.scrapPrice(side);
-      card.innerHTML = `<div class="armHead"><b>${side === 'L' ? '왼팔' : '오른팔'}</b><span class="armState">${state}</span></div>
-        <div class="armBtns">
-          <button class="btn sub" data-act="scrap" ${info.fist ? 'disabled' : ''}>고철 달기 <em>${fmt(sp)}</em></button>
-          <button class="btn sub" data-act="restore" ${info.flesh && info.I < 0.02 ? 'disabled' : ''}>손 회복 <em>${fmt(rp)}</em></button>
-        </div>`;
-      card.querySelector('[data-act=scrap]').addEventListener('click', () => { if (!A.scrap(side)) this.deny(); this.renderShop(); });
-      card.querySelector('[data-act=restore]').addEventListener('click', () => { if (!A.restore(side)) this.deny(); this.renderShop(); });
+      const healthy = info.flesh && info.I < 0.02;
+      const primary = info.fist ? '<div class="armReady">사용 가능</div>' :
+        `<button class="btn sub" data-act="scrap" ${G.credits < sp ? 'disabled' : ''}><span>${label}에 고철 달기</span><em>${fmt(sp)} 크레딧</em></button>`;
+      card.innerHTML = `<div class="armHead"><b>${label}</b><span class="armState">${state}</span></div>
+        <div class="armBtns">${primary}
+          ${healthy ? '' : `<button class="btn sub restore" data-act="restore" ${G.credits < rp ? 'disabled' : ''}><span>${label} 회복</span><em>${fmt(rp)} 크레딧</em></button>`}
+        </div>${!info.fist && G.credits < sp ? `<p class="armCostNote">${fmt(sp - G.credits)} 크레딧 부족</p>` : ''}`;
+      card.querySelector('[data-act=scrap]')?.addEventListener('click', () => {
+        if (!A.scrap(side)) this.deny();
+        this.renderShop();
+      });
+      card.querySelector('[data-act=restore]')?.addEventListener('click', () => {
+        if (!A.restore(side)) this.deny();
+        this.renderShop();
+      });
       arms.appendChild(card);
     }
-    // 벽
+    // 벽은 현재 선택만 먼저 보여 주고, 목록은 필요할 때 펼친다.
+    const selected = this.WALLS.find((w) => w.id === G.wall);
+    $('#sWallName').textContent = selected ? selected.name : '';
+    $('#sWallMult').textContent = selected ? '수입 ×' + selected.mult : '';
+    const reserve = A.canStart() ? 0 : Math.min(A.scrapPrice('L'), A.scrapPrice('R'));
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
       const owned = G.owned.includes(w.id), cur = G.wall === w.id;
+      const poor = !owned && G.credits < w.price;
+      const needsArm = !owned && !poor && G.credits - w.price < reserve;
       const row = document.createElement('button');
-      row.className = 'wall' + (cur ? ' cur' : '') + (owned ? ' owned' : '') + (!owned && G.credits < w.price ? ' poor' : '');
+      row.className = 'wall' + (cur ? ' cur' : '') + (owned ? ' owned' : '') + (poor || needsArm ? ' poor' : '');
+      row.disabled = cur || poor || needsArm;
       row.innerHTML = `<span class="sw" style="background:${SWATCH[w.id]}"></span>
         <span class="wt"><b>${w.name}</b><small>${w.desc}</small></span>
-        <span class="wp">${cur ? '<i>사용 중</i>' : owned ? '<i class="o">바꾸기</i>' : '<em>' + fmt(w.price) + '</em>'}<small>크레딧 ×${w.mult}</small></span>`;
+        <span class="wp">${cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>구매 ' + fmt(w.price) + '</em>'}<small>수입 ×${w.mult}</small>${needsArm || poor ? '<small>' + (needsArm ? '고철 비용 필요' : '크레딧 부족') + '</small>' : ''}</span>`;
       row.addEventListener('click', () => {
         if (cur) return;
         if (owned) A.selectWall(w.id);
@@ -124,16 +152,13 @@ export class UI {
       });
       list.appendChild(row);
     }
-    const can = A.canStart();
+    const left = A.armInfo('L').fist, right = A.armInfo('R').fist;
     const btn = $('#btnNext');
-    if (can) { btn.disabled = false; btn.textContent = '다음 판'; $('#nextNote').textContent = ''; }
-    else {
-      const need = ['L', 'R'].filter((s) => !A.armInfo(s).fist).map((s) => A.scrapPrice(s));
-      const all = need.reduce((x, y) => x + y, 0), one = Math.min(...need);
-      if (G.credits >= one) { btn.disabled = false; btn.innerHTML = `고철 달고 다음 판 <em class="np">${fmt(G.credits >= all ? all : one)}</em>`; $('#nextNote').textContent = ''; }
-      else { btn.disabled = true; btn.textContent = '다음 판'; $('#nextNote').textContent = '크레딧이 모자랍니다.'; }
-    }
+    btn.disabled = !A.canStart();
+    btn.textContent = left && right ? '양팔로 다음 판' : left ? '왼팔로 다음 판' : right ? '오른팔로 다음 판' : '고철을 장착하세요';
+    $('#nextNote').textContent = left && right ? '' : left || right ? '다른 쪽도 장착하거나, 한쪽만으로 시작하세요.' : '한쪽만 장착해도 시작할 수 있습니다.';
   }
   deny() { const c = $('#sCredits'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake'); }
   toast(t) { const h = this.el.hint; h.textContent = t; h.classList.add('show', 'top'); clearTimeout(this._ht); this._ht = setTimeout(() => h.classList.remove('show', 'top'), 2400); }
 }
+

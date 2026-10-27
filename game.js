@@ -178,11 +178,14 @@ function camUpdate(rdt) {
 class Fist {
   constructor(arm) {
     this.arm = arm;
+    this.resetMotion();
+  }
+  resetMotion() {
     this.state = 'idle';
     this.s = 0;              // 뻗은 정도: 0 가드 ~ 1 벽에 닿음
     this.u = 0; this.s0 = 0; this.dur = STRIKE_T; this.wind = 0; this.slow = false;
-    this.queue = 0;
-    this.stuckTaps = 0; this.pinT = 0; this.sinkT = 0; this.sinkD = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
+    this.queue = 0; this.autoPunch = false; this.pendingChain = null; this.hold = 0;
+    this.stuckTaps = 0; this.stuckT = 0; this.pinT = 0; this.sinkT = 0; this.sinkD = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
     this.flinchUntil = 0;
     this.tug = 0; this.tremble = 0;
     this.lastPress = -9;
@@ -194,7 +197,7 @@ class Fist {
   }
   press(now) {
     const st = this.state;
-    if (mode !== 'play') return;
+    if (mode !== 'play' || !round || round.ended) return;
     if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
     if (st === 'stuck') { onTug(this, now); return; }
     if (st === 'pinned') { onTug(this, now); return; }
@@ -370,6 +373,7 @@ function payTkd(group) {
 
 // ------------------------------------------------------------------ 타격
 function onImpact(fist, now) {
+  if (mode !== 'play' || !round || round.ended) { fist.goBack(BACK_T); return; }
   const a = fist.arm;
   const res = { flesh: 0, scrap: 0, ev: [], point: null, finger: -1 };
   const W = wall.def;
@@ -525,13 +529,21 @@ function addCredits(n, bonus) {
 }
 
 // ------------------------------------------------------------------ 판
+function resetArmMotion(side) {
+  const f = fists[side], a = arms[side];
+  f.resetMotion();
+  f.pose(_pos);
+  a.root.position.copy(_pos.position); a.root.quaternion.copy(_pos.quaternion);
+  a.squash = 0; a.U.uImp.value.set(9, 0, 0.016);
+  a._pp = null; a._vp = null; a._acc.set(0, 0, 0);
+  a.update(0, time);
+}
+
 function newRound() {
   round = { punches: 0, earned: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false, endT: 0 };
   chain = [];
-  for (const f of Object.values(fists)) {
-    f.state = 'idle'; f.s = 0; f.u = 0; f.queue = 0; f.autoPunch = false;
-    f.comp = 0; f.compT = 0; f.flick = 0; f.flickV = 0; f.impT = 9; f.sinkD = 0; f.tug = 0; f.jit.set(0, 0, 0);
-  }
+  tkdPlayingUntil = 0;
+  for (const s of ['L', 'R']) resetArmMotion(s);
   hitstop = 0; rush = 0; cam.trauma = 0;
   for (const s of CAM_SPRINGS) s.reset();
 }
@@ -541,6 +553,12 @@ function checkRoundEnd() {
   const L = arms.L, R = arms.R;
   if (!L.hasFist() && !R.hasFist()) {
     round.ended = true; round.endT = time;
+    // 판이 끝나면 남은 입력·감전 연타를 멈추고 팔만 가드로 돌아옴.
+    for (const f of Object.values(fists)) {
+      f.queue = 0; f.autoPunch = false; f.pendingChain = null; f.spasm = 0;
+      if (f.state !== 'idle' && f.state !== 'back') f.goBack(BACK_T);
+    }
+    chain = [];
     setTimeout(() => endRound(), 1500);
   }
 }
@@ -659,7 +677,7 @@ function step(dt, rdt = dt) {
   for (const s of ['L', 'R']) {
     const f = fists[s], A = arms[s];
     f.tremble = wall ? wall.def.fear : 0;
-    f.update(dt, time);
+    if (mode === 'play') f.update(dt, time);
     f.feel(rdt);
     f.pose(_pos);
     A.root.position.copy(_pos.position);
@@ -782,11 +800,20 @@ function restoreArm(a, snap) {
 const actions = {
   start() {
     sfx.unlock();
+    if (!arms.L.hasFist() && !arms.R.hasFist()) {
+      mode = 'shop';
+      document.body.classList.remove('playing');
+      ui.hidePanels(); ui.showShop(round || { earned: 0 });
+      return false;
+    }
     mode = 'play';
     document.body.classList.add('playing');
     newRound();
+    ui.credits(G.credits, 0);
+    render();
     ui.hidePanels(); ui.hud(true);
     showHint('controls');
+    return true;
   },
   newGame() {
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
@@ -805,6 +832,7 @@ const actions = {
     const price = restorePrice();
     if (G.credits < price) return false;
     G.credits -= price; arms[side].reset(); arms[side].scrapObj && arms[side].scrapObj.dispose(); arms[side].scrapObj = null;
+    resetArmMotion(side);
     G.arms[side] = { I: 0 }; save(); sfx.play('restore', 0.8); return true;
   },
   scrap(side) {
@@ -816,6 +844,7 @@ const actions = {
     a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
     a.scrapObj = new Scrap(a, a.scrapSeed);
     a.scrap = a.scrapObj.state;
+    resetArmMotion(side);
     G.arms[side] = armSnapshot(a);
     save(); sfx.play('scrapOn', 0.9); return true;
   },
@@ -846,3 +875,4 @@ function tick(dt, n = 1, draw = true) {
 window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; } };
 
 boot().catch((e) => { console.error(e); const el = $('#err'); if (el) { el.textContent = '불러오기 실패: ' + e.message; el.style.display = 'block'; } });
+
