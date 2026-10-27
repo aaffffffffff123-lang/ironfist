@@ -89,10 +89,6 @@ body.playing #sound{display:none}
 .res{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .res h2{margin:0;font-size:15px;color:var(--ink2);font-weight:700}
 #rEarned{font-family:'Black Han Sans',var(--font);font-size:40px;letter-spacing:-.01em}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 4px}
-.stat{background:#f6f4f0;border-radius:12px;padding:10px 8px;text-align:center}
-.stat b{display:block;font-size:22px;font-weight:900;font-variant-numeric:tabular-nums}
-.stat span{font-size:11.5px;color:var(--ink2);font-weight:500}
 .sec{margin:22px 0 10px;display:flex;align-items:center;justify-content:space-between}
 .sec h3{margin:0;font-size:17px;font-weight:900}
 .wallet{display:flex;align-items:center;gap:6px;font-weight:900;font-variant-numeric:tabular-nums}
@@ -166,7 +162,6 @@ body.playing #sound{display:none}
 <section id="shop">
   <div class="sheet">
     <div class="res"><h2>이번 판</h2><span id="rEarned">+0</span></div>
-    <div class="stats" id="rStats"></div>
     <div class="sec"><h3>팔</h3><span class="wallet"><i class="coin"></i><span id="sCredits">0</span></span></div>
     <div class="arms" id="sArms"></div>
     <div class="sec"><h3>벽</h3></div>
@@ -179,7 +174,7 @@ body.playing #sound{display:none}
 <div id="err"></div>
 
 <!-- ?v= : 고친 파일을 올렸을 때 예전 파일이 브라우저 캐시에서 섞여 나오지 않게 -->
-<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=2","./fx.js":"./fx.js?v=2","./sfx.js":"./sfx.js?v=2","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=2","./scrap.js":"./scrap.js?v=2","./ui.js":"./ui.js?v=2","./room-env.js":"./room-env.js?v=2"}}</script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=2","./fx.js":"./fx.js?v=2","./sfx.js":"./sfx.js?v=2","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=2","./scrap.js":"./scrap.js?v=2","./ui.js":"./ui.js?v=3","./room-env.js":"./room-env.js?v=2"}}</script>
 <script type="module" src="./game.js?v=2"></script>
 </body>
 </html>
