@@ -80,11 +80,6 @@ export class UI {
     this.hud(false);
     const s = this.el.shop;
     $('#rEarned').textContent = '+' + fmt(round.earned);
-    const stats = [
-      ['부러진 뼈', round.fract], ['빠진 손톱', round.nail], ['떨어진 손가락', round.finger], ['떨어진 손', round.hand],
-      ['떨어진 고철 부품', round.scrapParts], ['태권도', round.tkd],
-    ].filter(([, v]) => v > 0);
-    $('#rStats').innerHTML = stats.map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join('') || '<div class="stat"><b>0</b><span>남긴 상처</span></div>';
     this.renderShop();
     s.classList.add('show');
     s.scrollTop = 0;
