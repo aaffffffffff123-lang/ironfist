@@ -108,11 +108,11 @@ export class UI {
       const card = document.createElement('div');
       card.className = 'arm' + (info.fist ? ' ready' : '');
       card.dataset.side = side;
-      const state = info.scrap ? '고철 장착됨' : info.fist ? (info.I < 0.02 ? '맨손' : '다친 맨손') : '고철 없음';
+      const state = info.scrap ? '철권 장착됨' : info.fist ? (info.I < 0.02 ? '맨손' : '다친 맨손') : '철권 없음';
       const rp = A.restorePrice(), sp = A.scrapPrice(side);
       const healthy = info.flesh && info.I < 0.02;
       const primary = info.fist ? '<div class="armReady">사용 가능</div>' :
-        `<button class="btn sub" data-act="scrap" ${G.credits < sp ? 'disabled' : ''}><span>${label}에 고철 달기</span><em>${fmt(sp)} 크레딧</em></button>`;
+        `<button class="btn sub" data-act="scrap" ${G.credits < sp ? 'disabled' : ''}><span>${label}에 철권 장착</span><em>${fmt(sp)} 크레딧</em></button>`;
       card.innerHTML = `<div class="armHead"><b>${label}</b><span class="armState">${state}</span></div>
         <div class="armBtns">${primary}
           ${healthy ? '' : `<button class="btn sub restore" data-act="restore" ${G.credits < rp ? 'disabled' : ''}><span>${label} 회복</span><em>${fmt(rp)} 크레딧</em></button>`}
@@ -142,11 +142,11 @@ export class UI {
       row.disabled = cur || poor || needsArm;
       row.innerHTML = `<span class="sw" style="background:${SWATCH[w.id]}"></span>
         <span class="wt"><b>${w.name}</b><small>${w.desc}</small></span>
-        <span class="wp">${cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>구매 ' + fmt(w.price) + '</em>'}<small>수입 ×${w.mult}</small>${needsArm || poor ? '<small>' + (needsArm ? '고철 비용 필요' : '크레딧 부족') + '</small>' : ''}</span>`;
+        <span class="wp">${cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>구매 ' + fmt(w.price) + '</em>'}<small>수입 ×${w.mult}</small>${needsArm || poor ? '<small>' + (needsArm ? '철권 비용 필요' : '크레딧 부족') + '</small>' : ''}</span>`;
       row.addEventListener('click', () => {
         if (cur) return;
         if (owned) A.selectWall(w.id);
-        else { const r = A.buyWall(w.id); if (r === 'need') { this.toast('고철 달 크레딧은 남겨 둬야 합니다'); this.deny(); return; } if (!r) { this.deny(); return; } }
+        else { const r = A.buyWall(w.id); if (r === 'need') { this.toast('철권 장착 비용은 남겨 둬야 합니다'); this.deny(); return; } if (!r) { this.deny(); return; } }
         this.renderShop();
       });
       list.appendChild(row);
@@ -154,7 +154,7 @@ export class UI {
     const left = A.armInfo('L').fist, right = A.armInfo('R').fist;
     const btn = $('#btnNext');
     btn.disabled = !A.canStart();
-    btn.textContent = left && right ? '양팔로 다음 판' : left ? '왼팔로 다음 판' : right ? '오른팔로 다음 판' : '고철을 장착하세요';
+    btn.textContent = left && right ? '양팔로 다음 판' : left ? '왼팔로 다음 판' : right ? '오른팔로 다음 판' : '철권을 장착하세요';
     $('#nextNote').textContent = left && right ? '' : left || right ? '다른 쪽도 장착하거나, 한쪽만으로 시작하세요.' : '한쪽만 장착해도 시작할 수 있습니다.';
   }
   deny() { const c = $('#sCredits'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake'); }

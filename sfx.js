@@ -1,5 +1,4 @@
-// 철권 — 효과음 합성 (불러올 때 한 번 만들어 둠) + 녹음한 맨주먹 타격음 + 태권도 목소리
-import VOICE_B64 from './voice.js';
+// 철권 — 효과음 합성 (불러올 때 한 번 만들어 둠) + 녹음한 맨주먹 타격음
 import PUNCH from './punch.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -505,17 +504,9 @@ export class SFX {
       this.amb = {};
       for (const [k, a] of Object.entries(this.rawAmb)) { const b = c.createBuffer(1, a.length, SR); b.copyToChannel(a, 0); this.amb[k] = b; }
       this.ready = true;
-      this.loadVoice();
       if (this.pendingAmb) this.ambience(this.pendingAmb);
     }
     if (this.ctx.state === 'suspended' && this.ctx.resume) { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); }
-  }
-  async loadVoice() {
-    try {
-      const bin = atob(VOICE_B64); const u = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-      this.voiceBuf = await this.ctx.decodeAudioData(u.buffer);
-    } catch (e) { console.warn('voice', e); }
   }
   setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.9; }
   // opts: rate, jitter, delay, verb(false면 울림 없음), verbAmt, pan(-1 왼쪽 ~ 1 오른쪽)
@@ -539,15 +530,6 @@ export class SFX {
     let rate = 1, delay = 0;
     if (dur >= T) delay = dur - T; else rate = T / dur;
     this.play('whoosh', vol, { rate, delay, jitter: 0.05, pan: side === 'L' ? -0.38 : 0.38, verbAmt: 0.25 });
-  }
-  voice(id) {
-    if (!this.ready || !this.voiceBuf) return;
-    const c = this.ctx, src = c.createBufferSource();
-    src.buffer = this.voiceBuf;
-    const g = c.createGain(); g.gain.value = 1.0;
-    src.connect(g); g.connect(this.master);
-    const s = c.createGain(); s.gain.value = 0.6; g.connect(s); s.connect(this.verb);
-    src.start();
   }
   ambience(id) {
     if (!this.ready) { this.pendingAmb = id; return; }

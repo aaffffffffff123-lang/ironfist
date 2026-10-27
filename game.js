@@ -358,7 +358,6 @@ class Fist {
 
 // ------------------------------------------------------------------ 태권도 판정
 let chain = [];
-let tkdPlayingUntil = 0;
 function registerPunch(fist, now) {
   if (fist.autoPunch) return;
   chain.push({ side: fist.arm.side, t: now, credits: 0, fist });
@@ -369,7 +368,6 @@ function registerPunch(fist, now) {
     const alt = a.side !== b.side && b.side !== c.side;
     const fast = (b.t - a.t) < 0.42 && (c.t - b.t) < 0.42;
     if (alt && fast) {
-      if (now >= tkdPlayingUntil) { sfx.voice('tkd'); tkdPlayingUntil = now + 0.85; }
       round.tkd++;
       const group = { links: chain.slice(), paid: false };
       for (const l of group.links) l.group = group;
@@ -560,7 +558,6 @@ function resetArmMotion(side) {
 function newRound() {
   round = { punches: 0, earned: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false, endT: 0 };
   chain = [];
-  tkdPlayingUntil = 0;
   for (const s of ['L', 'R']) resetArmMotion(s);
   hitstop = 0; rush = 0; cam.trauma = 0;
   for (const s of CAM_SPRINGS) s.reset();
