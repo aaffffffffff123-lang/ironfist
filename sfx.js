@@ -547,10 +547,12 @@ export class SFX {
     const pan = side === 'L' ? -0.2 : 0.2;
     const scrap = res.scrap > 0;
     const mat = MAT[wallId], thud = THUD[wallId];
+    // 벽은 멀쩡하고 손만 망가지는 대신, 모든 접촉에 짧고 낮은 '쿵'을 또렷하게 남긴다.
+    const boom = scrap ? 1.05 : arm.I >= 0.5 ? 0.92 : 0.88;
+    this.play('heft', boom * k, { pan, rate: scrap ? 0.9 : 0.94, jitter: 0.04, verbAmt: 0.72 });
     if (scrap) {
       // 쇳덩이가 벽을 때림: 쨍 + 묵직한 쿵
       this.play('clank', Math.max(0.85, v), { pan }); if (Math.random() < 0.5) this.play('ping', 0.4, { delay: rnd(0.04, 0.12), pan: pan * 2 });
-      this.play('heft', 0.75 * k, { pan, verbAmt: 0.6 });
       if (thud) this.play(thud, 0.5, { pan });
     } else if (arm.I >= 0.5) {
       // 손 없는 팔뚝 끝이 짓이겨짐

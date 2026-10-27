@@ -69,7 +69,7 @@ const G = {
   credits: 0, owned: ['cement'], wall: 'cement',
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
-  decals: {}, stuck: {}, wallDamage: {},
+  decals: {}, stuck: {},
   seenHints: {},
 };
 let assets, arms = {}, wall = null, fx, sfx, ui;
@@ -93,8 +93,9 @@ function load() {
     G.owned = [...new Set((Array.isArray(G.owned) ? G.owned : []).filter((id) => valid.has(id)))];
     if (!G.owned.includes('cement')) G.owned.unshift('cement');
     if (!valid.has(G.wall) || !G.owned.includes(G.wall)) G.wall = 'cement';
-    for (const bag of [G.decals, G.stuck, G.wallDamage]) if (bag && typeof bag === 'object') delete bag.traps;
-    if (!G.wallDamage || typeof G.wallDamage !== 'object' || Array.isArray(G.wallDamage)) G.wallDamage = {};
+    for (const bag of [G.decals, G.stuck]) if (bag && typeof bag === 'object') delete bag.traps;
+    // 예전 버전의 벽 타격 흔적 저장값도 함께 폐기한다.
+    delete G.wallDamage;
     return true;
   } catch (e) { return false; }
 }
@@ -422,7 +423,6 @@ function onImpact(fist, now) {
   const feel = clamp(0.8 + tier * 0.25 + evW, 0.6, 1.9);
   fx.impact(a, P.contact, power, res, W, react);
   fx.impactDust(P.contact, W.id, feel, striker);
-  wall.damage(P.contact, feel, striker);
   sfx.impact(W.id, res, power, a, a.side, feel);
   for (const e of res.ev) handleEvent(a, e, P.contact);
   dropCrushed(a);
@@ -603,7 +603,6 @@ function setWall(id) {
   id = def.id;
   if (wall) { fx.persist(); wall.dispose(); }
   wall = createWall(id, { scene, renderer, fx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
-  wall.loadDamage((G.wallDamage || {})[id]);
   G.wall = id;
   fx.bindWall(wall);
   // 새 벽 재질은 미리(가능하면 백그라운드로) 컴파일
