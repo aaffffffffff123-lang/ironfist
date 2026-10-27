@@ -93,7 +93,7 @@ export class UI {
       const info = A.armInfo(side);
       const card = document.createElement('div'); card.className = 'arm';
       let state;
-      if (info.fist && info.flesh) state = info.I < 0.02 ? '멀쩡함' : '다친 손';
+      if (info.fist && info.flesh) state = info.I < 0.02 ? '멀쩡함' : info.crushed ? '뭉개진 손' : info.broken ? '부러진 손' : '다친 손';
       else if (info.scrap) state = '고철 손';
       else if (info.I < 0.999) state = `손 없음 · 팔뚝 ${Math.round((1 - (info.I - 0.5) / 0.5) * 100)}% 남음`;
       else state = '팔꿈치까지 없음';

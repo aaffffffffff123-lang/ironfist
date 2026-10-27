@@ -260,13 +260,24 @@ function design(S) {
     const c = S.filt(S.noise(200), 'bp', 3800, 6); S.add(out, S.mul(c, S.envExp(c.length, 0.0001, 0.002)), 0.065, 1);
     return out;
   }, 3);
-  put('detach', () => {
-    const out = S.buf(0.7);
-    S.add(out, B.tear[Math.floor(Math.random() * B.tear.length)], 0, 0.9);
-    S.add(out, B.crack[Math.floor(Math.random() * B.crack.length)], 0.02, 0.6);
-    S.add(out, B.squelch[Math.floor(Math.random() * B.squelch.length)], 0.12, 1.0);
+  // 깨진 뼈가 살을 뚫고 나옴: 우득 + 질척 + 살갗이 터지는 짧은 소리
+  put('bonePop', () => {
+    const out = S.buf(0.5);
+    S.add(out, B.crack[Math.floor(Math.random() * B.crack.length)], 0, 1.0);
+    S.add(out, B.squelch[Math.floor(Math.random() * B.squelch.length)], 0.015, 0.8);
+    const t = S.filt(S.noise(Math.floor(0.05 * S.sr)), 'bp', rnd(1500, 2200), 2.5);
+    S.add(out, S.mul(t, S.envExp(t.length, 0.001, 0.012)), 0.01, 0.5);
     return out;
   }, 3);
+  // 짓이겨져 뭉개짐: 뼈 바스러짐 + 질척 + 묵직하게 눌림
+  put('mash', () => {
+    const out = S.buf(0.6);
+    S.add(out, B.crunch[Math.floor(Math.random() * B.crunch.length)], 0, 1.0);
+    S.add(out, B.crack[Math.floor(Math.random() * B.crack.length)], rnd(0.005, 0.02), 0.7);
+    S.add(out, B.squelch[Math.floor(Math.random() * B.squelch.length)], 0.02, 0.9);
+    S.add(out, S.sat(S.sweep(0.18, rnd(120, 150), 48, 0.03, 0.05), 2.4), 0, 0.7);
+    return out;
+  }, 4);
   put('stump', () => {
     const out = S.buf(0.35);
     S.add(out, thudCore(90, 600, 0.3), 0, 0.8);

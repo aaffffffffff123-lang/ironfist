@@ -1,7 +1,6 @@
-// 철권 — 효과: 피 지도(벽에 묻는 피), 핏방울, 살점·뼛조각·손톱·손가락, 연기·김·거품·불꽃·전기
+// 철권 — 효과: 피 지도(벽에 묻는 피), 핏방울, 살점·뼛조각·찢긴 살가죽, 연기·김·거품·불꽃·전기
 import * as THREE from 'three';
 import { SHARED, rockGeo } from './walls.js';
-import { SEG } from './arm.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -338,7 +337,7 @@ export class FX {
     this.nailMat = new THREE.MeshStandardMaterial({ color: 0xf0d8cf, roughness: 0.3, side: THREE.DoubleSide });
     this.boneGeo = (() => { const g = new THREE.TetrahedronGeometry(1, 0); g.scale(0.6, 1.6, 0.6); return g; })();
     this.nailGeo = (() => { const g = new THREE.CylinderGeometry(1, 1, 0.12, 12, 1, true, -0.9, 1.8); g.rotateZ(Math.PI / 2); g.scale(0.6, 1, 1); return g; })();
-    this.flying = [];          // 날아가는 덩어리(메시)
+    this.flying = [];          // 날아가는 살점·뼛조각·부품(메시)
     this.stuckGroup = new THREE.Group(); scene.add(this.stuckGroup);
     this.stuckList = [];
     // 입자
@@ -356,7 +355,7 @@ export class FX {
     this.wall = null;
     this.armRefs = null;
   }
-  // 벽에 꽂힌 손·손가락·고철 부품은 개수 제한(오래된 것부터 치움) — 계속 쌓이면 무거워짐
+  // 벽에 꽂힌 고철 부품은 개수 제한(오래된 것부터 치움) — 계속 쌓이면 무거워짐
   capStuck(list, obj, max) {
     list.push(obj);
     while (list.length > max) { const o = list.shift(); if (o.parent) o.parent.remove(o); }
@@ -367,7 +366,7 @@ export class FX {
     this.wall = wall;
     const dc = DUST[wall.def.id];
     if (dc) { this.dust.mat.uniforms.uColor.value.set(dc.dust); this.grit.mat.uniforms.uColor.value.set(dc.grit); }
-    this.stuckGibs = []; this.stuckScrap = [];
+    this.stuckScrap = [];
     this.blood.load((this.G.decals || {})[wall.def.id]);
     this.loadStuck((this.G.stuck || {})[wall.def.id]);
   }
@@ -391,7 +390,7 @@ export class FX {
       blood *= 0.35;
     }
     const cx = c.x, cy = c.y;
-    const fistPrint = !scrapHit && arm.I < 0.5;
+    const fistPrint = !scrapHit && arm.I < 0.5 && arm.crushZ > 0.09;   // 주먹 모양이 남아 있을 때만 너클 자국
     // 살 주먹은 첫 대부터 옅은 너클 자국(살갗이 쓸린 자리)이 남고 칠수록 진해짐
     if (blood > 0.12 || (fistPrint && W.id !== 'slime' && W.id !== 'spikes')) {
       // 타격면 핏자국
@@ -413,7 +412,7 @@ export class FX {
     if (!scrapHit && arm.I > 0.18) {
       const m = Math.floor(rnd(0, 1.5 + flesh * 6));
       for (let i = 0; i < m; i++) this.chunk(c, wallZ, Math.random() < 0.82 ? 'meat' : (Math.random() < 0.5 ? 'fat' : 'skin'), rnd(0.002, 0.005) * (1 + flesh));
-      if (res.ev.some((e) => e.t === 'fract') || (arm.I > 0.35 && Math.random() < 0.35)) for (let i = 0; i < 2; i++) this.chunk(c, wallZ, 'bone', rnd(0.0018, 0.004));
+      if (res.ev.some((e) => e.t === 'fract' || e.t === 'mfract') || (arm.I > 0.35 && Math.random() < 0.35)) for (let i = 0; i < 2; i++) this.chunk(c, wallZ, 'bone', rnd(0.0018, 0.004));
     }
     // 벽 성격별
     if (W.id === 'hotplate') this.smokeBurst(c, 1 + power * 0.5);
@@ -490,71 +489,26 @@ export class FX {
     for (let i = 0; i < n; i++) this.spawnDrop(c.x, c.y, wall.surfaceZ() + 0.03, rnd(-0.6, 0.6), rnd(-0.3, 0.6), rnd(0, 0.5), rnd(0.0008, 0.002));
   }
 
-  // 손톱이 빠져 날아감
-  flyNail(arm, f) {
-    const c = this.lastContact || new THREE.Vector3(0, -0.05, -0.6);
-    const m = new THREE.Mesh(this.nailGeo, this.nailMat);
-    m.scale.set(0.006, 0.0075, 0.006);
-    m.position.set(c.x, c.y, (this.wall ? this.wall.surfaceZ() : -0.6) + 0.02);
-    this.scene.add(m);
-    this.flying.push({ m, v: new THREE.Vector3(rnd(-1, 1), rnd(0.2, 1.4), rnd(-0.4, 0.4)), w: new THREE.Vector3(rnd(-30, 30), rnd(-30, 30), rnd(-30, 30)), t: 0, kind: 'nail', stick: Math.random() < 0.6, size: 0.006 });
-  }
-
-  // 손가락·손 덩어리
-  gibGeometry(arm, segs) {
-    const key = segs.join(',');
-    this._gibCache = this._gibCache || {};
-    if (this._gibCache[key]) return this._gibCache[key];
-    const src = arm.skin.geometry;
-    const seg = src.attributes.aSeg.array, idx = src.index.array;
-    const set = new Set(segs);
-    const out = [];
-    for (let i = 0; i < idx.length; i += 3) if (set.has(seg[idx[i + 2]])) out.push(idx[i], idx[i + 1], idx[i + 2]);   // 팔 쪽(flat, 마지막 꼭짓점 기준)과 같은 판정
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', src.attributes.position); g.setAttribute('normal', src.attributes.normal); g.setAttribute('color', src.attributes.color);
-    g.setIndex(out); g.computeBoundingSphere();
-    this._gibCache[key] = g;
-    return g;
-  }
-  gibMat() {
-    if (!this._gibMat) {
-      this._gibMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, side: THREE.DoubleSide });
-      this._gibMat.onBeforeCompile = (sh) => {
-        sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-          diffuseColor.rgb = gl_FrontFacing ? mix(diffuseColor.rgb, vec3(0.3,0.01,0.01), 0.35) : vec3(0.25, 0.01, 0.01);`);
-      };
+  // 짓이겨진 앞면에서 살점·뼛조각·찢긴 살가죽이 튀고 피가 뿜어짐 (c: 벽에 닿은 자리, k: 양)
+  mash(c, k = 1) {
+    const wallZ = this.wall.surfaceZ();
+    const n = Math.round(rnd(2, 4) * k);
+    for (let i = 0; i < n; i++) {
+      const r = Math.random();
+      const kind = r < 0.55 ? 'meat' : r < 0.75 ? 'bone' : r < 0.9 ? 'skin' : 'fat';
+      this.chunk(c, wallZ, kind, (kind === 'bone' ? rnd(0.0022, 0.0045) : rnd(0.0028, 0.0065)) * (0.85 + k * 0.15));
     }
-    return this._gibMat;
+    const nd = Math.round(18 * k);
+    for (let i = 0; i < nd; i++) {
+      const a = Math.random() * Math.PI * 2, sp = rnd(0.6, 2.4);
+      this.spawnDrop(c.x + rnd(-0.012, 0.012), c.y + rnd(-0.01, 0.01), wallZ + rnd(0.01, 0.03), Math.cos(a) * sp, Math.sin(a) * sp * 0.8 + rnd(-0.1, 0.7), rnd(-0.2, 0.7), rnd(0.0008, 0.0026));
+    }
+    this.blood.splat(c.x + rnd(-0.006, 0.006), c.y + rnd(-0.006, 0.006), 0.022 + 0.012 * k, { dark: Math.random() * 0.4, alpha: 0.95 });
+    if (k > 0.9 && Math.random() < 0.7 && this.wall.def.id !== 'slime') this.blood.drip(c.x + rnd(-0.015, 0.015), c.y - rnd(0, 0.01), rnd(0.08, 0.22) * (this.wall.def.id === 'freezer' ? 0.25 : 1), rnd(0.0025, 0.005));
   }
-  flyGib(arm, segs, pivot, wall) {
-    const g = this.gibGeometry(arm, segs.map((n) => SEG[n]));
-    const holder = new THREE.Group();
-    // 팔의 현재 월드 자세
-    arm.mirror.updateMatrixWorld(true);
-    const mw = arm.mirror.matrixWorld.clone();
-    const pos = new THREE.Vector3().copy(pivot).applyMatrix4(mw);
-    holder.position.copy(pos);
-    const q = new THREE.Quaternion(); arm.root.getWorldQuaternion(q); holder.quaternion.copy(q);
-    const inner = new THREE.Mesh(g, this.gibMat());
-    inner.position.copy(pivot).multiplyScalar(-1);
-    inner.castShadow = true;
-    const mir = new THREE.Group(); mir.scale.x = arm.side === 'R' ? -1 : 1; mir.add(inner);
-    holder.add(mir);
-    this.scene.add(holder);
-    const stickWall = wall && (wall.def.id === 'nails' || wall.def.id === 'spikes' || wall.def.id === 'slime' || wall.def.id === 'freezer');
-    this.flying.push({ m: holder, v: new THREE.Vector3(rnd(-0.4, 0.4) - arm.sign * 0.2, rnd(-0.2, 0.6), stickWall ? -0.8 : rnd(-0.2, 0.4)), w: new THREE.Vector3(rnd(-6, 6), rnd(-6, 6), rnd(-6, 6)), t: 0, kind: 'gib', stick: stickWall, size: 0.03, gibSlime: wall && wall.def.id === 'slime' });
-    // 피 왈칵
-    const c = pos;
-    for (let i = 0; i < 30; i++) this.spawnDrop(c.x, c.y, c.z, rnd(-1, 1), rnd(-0.5, 1.2), rnd(-0.6, 0.6), rnd(0.001, 0.003));
-  }
-  flyFinger(arm, f, wall) {
-    if (f === 4) return this.flyGib(arm, ['t1', 't2'], arm.anatT1 || new THREE.Vector3().fromArray([-0.044, -0.029, 0.054]), wall);
-    return this.flyGib(arm, [`f${f}p`, `f${f}m`, `f${f}d`], (this.anat ? this.anat.MCP[f] : new THREE.Vector3()), wall);
-  }
-  flyHand(arm, wall) {
-    const segs = ['hand', 't0', 't1', 't2'];
-    for (let f = 0; f < 4; f++) segs.push(`f${f}p`, `f${f}m`, `f${f}d`);
-    this.flyGib(arm, segs, new THREE.Vector3(0, 0.002, 0.0), wall);
+  // 살을 뚫고 나온 뼈 자리에서 피가 찍 (p: 월드 좌표)
+  spurt(p, n = 12) {
+    for (let i = 0; i < n; i++) this.spawnDrop(p.x, p.y, p.z, rnd(-0.5, 0.5), rnd(0.2, 1.4), rnd(-0.6, 0.2), rnd(0.0007, 0.0018));
   }
   dropObject(obj, arm) {
     // 팔에 붙어 있던 물건을 떨어뜨림(쥐덫 등)
@@ -657,20 +611,14 @@ export class FX {
       f.m.rotation.x += f.w.x * dt; f.m.rotation.y += f.w.y * dt; f.m.rotation.z += f.w.z * dt;
       if (f.stick && f.m.position.z <= wallZ + f.size * 0.4) {
         // 벽에 붙음
-        if (f.kind === 'gib' || f.kind === 'obj') {
-          if (f.gibSlime && this.wall && this.wall.addFloater) { this.scene.remove(f.m); this.wall.addFloater(f.m); f.m.scale.multiplyScalar(0.95); continue; }
-          f.m.position.z = wallZ + 0.02; f.done = true;
-          this.wall.group.attach(f.m);
-          if (f.kind === 'gib') f.m.traverse((o) => { o.castShadow = false; });
-          this.capStuck(this.stuckGibs, f.m, 6);
-          continue;
-        }
         if (f.kind === 'scrap') {
           f.m.position.z = wallZ + rnd(-0.002, 0.004);
           this.wall.group.attach(f.m);
           this.capStuck(this.stuckScrap, f.m, 40);
           continue;
         }
+        // 슬라임 벽: 살점·뼛조각이 슬라임 속에 떠 있음
+        if (this.wall && this.wall.addFloater) { this.scene.remove(f.m); f.m.castShadow = false; this.wall.addFloater(f.m); continue; }
         this.scene.remove(f.m);
         this.stickChunk(new THREE.Vector3(f.m.position.x, f.m.position.y, wallZ + f.size * 0.3), f.size, f.kind === 'nail' ? 'nail' : f.kind, [f.m.rotation.x, f.m.rotation.y, f.m.rotation.z]);
         this.blood.drop(f.m.position.x, f.m.position.y, f.size * 0.9);

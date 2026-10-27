@@ -1,7 +1,7 @@
 // 철권 — 메인
 import * as THREE from 'three';
 import { RoomEnvironment } from './room-env.js';
-import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT, SQUASH_Z } from './arm.js';
+import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT } from './arm.js';
 import { WALLS, createWall, hitter } from './walls.js';
 import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
@@ -62,12 +62,6 @@ scene.add(rim);
 // 벽이 빌려 쓰는 점광원(늘 2개 — 벽을 바꿔도 재질을 다시 컴파일하지 않게)
 const lightPool = [0, 1].map(() => { const l = new THREE.PointLight(0xffffff, 0, 1, 2); l.position.set(0, -0.1, -0.5); scene.add(l); return l; });
 
-// 엑스레이 덮개
-const xrayVeil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: 0x050a14, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
-xrayVeil.layers.set(1); xrayVeil.renderOrder = 5; xrayVeil.frustumCulled = false;
-xrayVeil.position.set(0, 0, -0.05); xrayVeil.scale.set(0.2, 0.2, 1);
-camera.add(xrayVeil); scene.add(camera);
-
 // ------------------------------------------------------------------ 상태
 const SAVE_KEY = 'cheolgwon.v1';
 const G = {
@@ -80,7 +74,7 @@ const G = {
 let assets, arms = {}, wall = null, fx, sfx, ui;
 let mode = 'title';      // title | play | over | shop
 let round = null;
-let time = 0, rtime = 0, hitstop = 0, xray = 0;
+let time = 0, rtime = 0, hitstop = 0;
 let rush = 0;            // 최근 연타 정도 — 연타할수록 멈춤·흔들림을 줄여 답답하지 않게
 let layout = { portrait: false, k: 1 };
 let baseFov = 58;
@@ -299,12 +293,12 @@ class Fist {
     if (tmpV.lengthSq() < 1e-8) tmpV.set(1, 0, 0);
     this.impDir.copy(tmpV.normalize());
     this.impA = 0.0065 * feel * (who === 'scrap' ? 1.3 : 1);
-    // 살 주먹은 손이 납작해지는 만큼 팔이 더 들어감(앞면은 벽에 붙은 채)
-    this.push = who === 'hand' ? 0.097 * SQUASH_Z + 0.0008 : who === 'scrap' ? 0.0025 : 0.004;
+    // 살 주먹은 손이 납작해지는 만큼 팔이 더 들어감(앞면은 벽에 붙은 채). 손등뼈가 부러질수록 더 깊이 우그러짐
+    this.push = who === 'hand' ? Math.max(0, a.reach()) * a.squashZ() + 0.0008 : who === 'scrap' ? 0.0025 : 0.004;
     this.squashK = who === 'hand' ? 1 : 0;
     this.compT = react.stick === 'sink' ? 0 : hs + 0.03;
     this.ripA = (who === 'hand' ? 1 : 0.75) * Math.min(1.5, feel);
-    this.ripZ = who === 'hand' ? 0.016 : Math.min(a.cutZ, 0.0) - 0.004;
+    this.ripZ = Math.min(a.crushZ, 0.016) - (who === 'hand' && a.crushZ > 0.02 ? 0 : 0.004);
     if (!react.stick) this.flickV -= 1.5 + 0.9 * feel;
   }
   // 실제 시간으로 흐르는 부분: 눌림, 떨림
@@ -411,6 +405,7 @@ function onImpact(fist, now) {
   fx.impactDust(P.contact, W.id, feel, hitter(a));
   sfx.impact(W.id, res, power, a, a.side, feel);
   for (const e of res.ev) handleEvent(a, e, P.contact);
+  dropCrushed(a);
   a.kick(power);
   // 멈춤: 연타 중엔 짧게, 뼈가 부러지거나 떨어져 나가면 길게
   const hs = (react.stick ? 0.045 : 0.052 + tier * 0.014) / (1 + 0.35 * rush) + Math.min(0.09, evW * 0.12);
@@ -431,27 +426,44 @@ function onImpact(fist, now) {
   checkRoundEnd();
 }
 
+// mfract: 손등뼈 골절(너클이 꺼짐), fract: 손가락뼈 골절, open: 뼈가 살을 뚫고 나옴, nail: 손톱이 깨짐
+// crush: 앞면이 더 짓이겨짐, finger: 손가락이 짓이겨져 뭉개짐, hand: 손목 위가 다 없어짐, stump: 팔뚝 끝이 짓이겨짐
+const EV_CREDITS = { mfract: 12, fract: 12, open: 15, nail: 8, finger: 20, wrist: 30, hand: 60, crush: 0, stump: 4, lumpGone: 8, pipeGone: 5 };
+const EV_WEIGHT = { mfract: 0.42, fract: 0.3, open: 0.35, nail: 0.1, finger: 0.38, wrist: 0.45, hand: 0.7, crush: 0.05, stump: 0.08, lumpGone: 0.3, pipeGone: 0.2 };
 function eventCredits(evs) {
   let c = 0;
-  for (const e of evs) {
-    c += { fract: 15, nail: 10, finger: 25, wrist: 30, hand: 60, stump: 4, lumpGone: 8, pipeGone: 5 }[e.t] || 0;
-  }
+  for (const e of evs) c += EV_CREDITS[e.t] || 0;
   return c;
 }
 // 사건이 클수록 손맛을 키움
 function eventWeight(evs) {
   let w = 0;
-  for (const e of evs) w += { fract: 0.32, nail: 0.12, finger: 0.42, wrist: 0.45, hand: 0.7, stump: 0.08, lumpGone: 0.3, pipeGone: 0.2 }[e.t] || 0;
+  for (const e of evs) w += EV_WEIGHT[e.t] || 0;
   return Math.min(1, w);
 }
 
 function handleEvent(a, e, contact) {
-  if (e.t === 'fract') { xray = Math.max(xray, 1); sfx.play('crack', 0.9); hitstop = Math.max(hitstop, 0.09); round.fract++; }
-  if (e.t === 'nail') { sfx.play('nailRip', 0.8); fx.flyNail(a, e.f); round.nail++; }
-  if (e.t === 'finger') { sfx.play('detach', 0.8); fx.flyFinger(a, e.f, wall); round.finger++; }
-  if (e.t === 'wrist') { sfx.play('crack', 1.0); xray = 1; hitstop = Math.max(hitstop, 0.1); }
-  if (e.t === 'hand') { sfx.play('detach', 1.0); fx.flyHand(a, wall); round.hand++; hitstop = Math.max(hitstop, 0.12); }
-  if (e.t === 'lumpGone' || e.t === 'pipeGone') { round.scrapGone++; }
+  const c = contact || fx.lastContact;
+  switch (e.t) {
+    case 'mfract': sfx.play('crack', 1.0, { rate: 0.8 }); sfx.play('knuckle', 0.55, { rate: 0.62 }); hitstop = Math.max(hitstop, 0.1); round.fract++; break;
+    case 'fract': sfx.play('crack', 0.85); hitstop = Math.max(hitstop, 0.08); round.fract++; break;
+    case 'open': {
+      sfx.play('bonePop', 0.95); hitstop = Math.max(hitstop, 0.07);
+      const sh = a.shards[a.shards.length - 1];
+      if (sh) fx.spurt(sh.getWorldPosition(new THREE.Vector3()), 16);
+      break;
+    }
+    case 'nail': sfx.play('nailRip', 0.6); round.nail++; break;
+    case 'wrist': sfx.play('crack', 1.0, { rate: 0.72 }); hitstop = Math.max(hitstop, 0.1); break;
+    case 'crush': if (c) fx.mash(c, 0.6); break;
+    case 'finger': sfx.play('mash', 0.85); if (c) fx.mash(c, 1.1); round.finger++; break;
+    case 'hand': sfx.play('mash', 1.0, { rate: 0.85 }); if (c) fx.mash(c, 2.0); round.hand++; hitstop = Math.max(hitstop, 0.12); break;
+    case 'lumpGone': case 'pipeGone': round.scrapGone++; break;
+  }
+}
+// 짓이겨진 자리에 붙어 있던 유리·쥐덫은 떨어져 나감
+function dropCrushed(a) {
+  for (const o of a.takeDropped()) fx.dropObject(o, a);
 }
 
 function scrapBreakFx(a, res, contact) {
@@ -472,6 +484,7 @@ function onTug(fist, now) {
   wall.tug(fist, a);
   sfx.play('tear', 0.55 + Math.random() * 0.2);
   for (const e of res.ev) handleEvent(a, e, null);
+  dropCrushed(a);
   camTug(a.side);
   vibrate(14);
   if (fist.state === 'stuck') {
@@ -494,6 +507,7 @@ function release(fist, now, auto) {
   wall.release(fist, a, poses(a.side, a).contact);
   sfx.play('rip', 0.9);
   for (const e of res.ev) handleEvent(a, e, null);
+  dropCrushed(a);
   // 확 뜯겨 나옴
   fist.goBack(0.24);
   fist.flickV += 2.4;
@@ -683,15 +697,13 @@ function step(dt, rdt = dt) {
         a._bleedAcc = (a._bleedAcc || 0) + c;
         if (a._bleedAcc >= 1) { const n = Math.floor(a._bleedAcc); a._bleedAcc -= n; addCredits(n); }
         for (const e of res.ev) handleEvent(a, e, null);
+        dropCrushed(a);
         if (res.ev.length) checkRoundEnd();
       }
     }
   }
   if (wall) wall.update(dt, time, arms, fists);
   fx.update(dt, time, rdt);
-  xray = Math.max(0, xray - dt * 4.5);
-  for (const s of ['L', 'R']) arms[s].U.uXray.value = Math.min(1, xray * 1.4);
-  xrayVeil.material.opacity = Math.min(0.82, xray * 1.1);
   camUpdate(rdt);
 }
 
@@ -712,15 +724,8 @@ function render() {
   // 입자 크기: 화면 높이(픽셀)와 시야각에 맞춤 — 세로 폰 화면(배율 2)에서 예전과 같은 크기
   PUFF_SCALE.value = renderer.getDrawingBufferSize(_dbs).y / (2 * Math.tan(camera.fov * D2R / 2)) / 1120;
   if (freeCam) { camera.position.copy(freeCam.p); camera.lookAt(freeCam.t); }
-  camera.layers.set(0);
   renderer.clear();
   renderer.render(scene, camera);
-  if (xray > 0.01) {
-    camera.layers.set(1);
-    renderer.clearDepth();
-    renderer.render(scene, camera);
-    camera.layers.set(0);
-  }
 }
 
 // ------------------------------------------------------------------ 시작
@@ -751,11 +756,12 @@ async function boot() {
 function warmup() {
   const tmp = [];
   const add = (m) => { m.position.set(0, -0.2, -0.5); scene.add(m); tmp.push(m); };
-  for (const mat of [fx.meatMat, fx.fatMat, fx.boneMat, fx.skinBitMat, fx.nailMat, fx.dropMat]) add(new THREE.Mesh(fx.meatGeos[0], mat));
-  add(new THREE.Mesh(fx.meatGeos[0], fx.gibMat()));
-  camera.layers.enableAll();
+  for (const mat of [fx.meatMat, fx.fatMat, fx.boneMat, fx.skinBitMat, fx.nailMat, fx.dropMat, arms.L.shardMat, arms.R.shardMat, arms.L.pulpMat, arms.R.pulpMat, arms.L.flapMat, arms.R.flapMat]) add(new THREE.Mesh(fx.meatGeos[0], mat));
+  // 속살·뼈는 살이 터지기 전엔 숨어 있음 → 처음 터질 때 멈칫하지 않게 미리 컴파일
+  const hidden = [];
+  for (const s of ['L', 'R']) for (const m of [arms[s].meat, arms[s].bone]) if (!m.visible) { m.visible = true; hidden.push(m); }
   try { renderer.compile(scene, camera); } catch (e) { console.warn(e); }
-  camera.layers.set(0);
+  for (const m of hidden) m.visible = false;
   for (const m of tmp) scene.remove(m);
 }
 
@@ -815,7 +821,7 @@ const actions = {
   },
   canStart() { return arms.L.hasFist() || arms.R.hasFist(); },
   restorePrice, scrapPrice: (s) => scrapPrice(arms[s]),
-  armInfo(s) { const a = arms[s]; return { flesh: a.I < 0.5, I: a.I, scrap: !!(a.scrap && a.scrap.lumpHP > 0), fist: a.hasFist() }; },
+  armInfo(s) { const a = arms[s]; return { flesh: a.I < 0.5, I: a.I, scrap: !!(a.scrap && a.scrap.lumpHP > 0), fist: a.hasFist(), crushed: a.crushZ < 0.095, broken: a.brokenK() > 0 }; },
   toggleSound(on) { sfx.setMuted(!on); G.muted = !on; save(); },
   isMuted() { return !!G.muted; },
 };
@@ -837,6 +843,6 @@ function tick(dt, n = 1, draw = true) {
   for (let i = 0; i < n; i++) advance(dt);
   if (draw) render();
 }
-window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, get xray() { return xray; }, set xray(v) { xray = v; }, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; } };
+window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; } };
 
 boot().catch((e) => { console.error(e); const el = $('#err'); if (el) { el.textContent = '불러오기 실패: ' + e.message; el.style.display = 'block'; } });

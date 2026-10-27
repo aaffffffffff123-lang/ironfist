@@ -454,9 +454,9 @@ class TrapWall extends WallBase {
     for (const i of snaps) this.setTrap(i);
     this.flush();
     const res = { snaps: snaps.length };
-    // 손(또는 고철 덩어리)에 물리는 덫
+    // 손(또는 고철 덩어리)에 물리는 덫 — 손 앞쪽이 짓이겨진 뒤엔 물 데가 없음
     const who = hitter(arm);
-    if ((who === 'hand' || who === 'scrap') && arm.traps.length < 4) {
+    if (((who === 'hand' && arm.crushZ > 0.09) || who === 'scrap') && arm.traps.length < 4) {
       near.sort((a, b) => a[0] - b[0]);
       const take = Math.min(snaps.length ? (Math.random() < 0.6 ? 1 : 2) : 0, near.length, 4 - arm.traps.length);
       for (let k = 0; k < take; k++) {
@@ -580,7 +580,7 @@ class GlassWall extends WallBase {
     const who = hitter(arm);
     if (who === 'scrap' || who === 'pipe') { this.ctx.fx.sparks(c, 8, 0xffd28a); return { dmgMul: 1 }; }
     if (who === 'stump') { stumpWound(arm, 2, 1, 0.026); stumpWound(arm, 4, 1, 0.03); return { dmgMul: 1.1 }; }
-    if (arm.I < 0.5) {
+    if (arm.I < 0.5 && arm.crushZ > 0.09) {
       // 손에 유리 조각이 박힌 채 남음
       const A = this.ctx.anat;
       const n = 1 + Math.floor(Math.random() * 3);
@@ -822,7 +822,7 @@ class SlimeWall extends WallBase {
   addFloater(obj) {
     obj.position.z = -this.D + rnd(0.004, 0.02);
     this.floaters.add(obj);
-    while (this.floaters.children.length > 8) this.floaters.remove(this.floaters.children[0]);
+    while (this.floaters.children.length > 16) this.floaters.remove(this.floaters.children[0]);
   }
 }
 
