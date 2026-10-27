@@ -6,7 +6,6 @@ const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in windo
 const SWATCH = {
   cement: 'linear-gradient(135deg,#c9c5bd,#a9a59d)',
   gravel: 'radial-gradient(circle at 30% 30%,#d6d0c4 0 18%,transparent 19%),radial-gradient(circle at 70% 60%,#7d776f 0 16%,transparent 17%),radial-gradient(circle at 40% 80%,#a8a093 0 14%,transparent 15%),#8f8a82',
-  traps: 'linear-gradient(90deg,#d9b483 0 70%,#b9b9bb 70% 74%,#d9b483 74%)',
   glass: 'linear-gradient(135deg,#2f9c55 0 30%,#9a9890 30% 45%,#7b3f12 45% 60%,#9a9890 60%)',
   nails: 'repeating-linear-gradient(90deg,#a98a66 0 6px,#8b6c4b 6px 7px),#a98a66',
   freezer: 'linear-gradient(90deg,#eef3f7 0 45%,#dfe7ee 45% 50%,#eef3f7 50%)',

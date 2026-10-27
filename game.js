@@ -11,6 +11,7 @@ import { UI } from './ui.js';
 const WALL_D = 0.62;                 // 카메라 → 벽 거리
 const FLESH_RATE = 400;              // 살 손실 1.0 당 크레딧(벽 배율 전)
 const SCRAP_RATE = 1.2;              // 고철 HP 1 당 크레딧
+const DAMAGE_PACE = 0.65;            // 한 판에서 손·고철이 박살나는 속도
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
 const BACK_T = 0.2;                  // 벽에서 튕겨 가드로 돌아오는 시간
@@ -68,7 +69,7 @@ const G = {
   credits: 0, owned: ['cement'], wall: 'cement',
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
-  decals: {}, stuck: {},
+  decals: {}, stuck: {}, wallDamage: {},
   seenHints: {},
 };
 let assets, arms = {}, wall = null, fx, sfx, ui;
@@ -83,7 +84,19 @@ function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch (e) {}
 }
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.owned) Object.assign(G, s); return !!s; } catch (e) { return false; }
+  try {
+    const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    if (!s || !s.owned) return false;
+    Object.assign(G, s);
+    // 삭제된 벽을 샀거나 선택한 예전 저장도 안전하게 이어서 시작한다.
+    const valid = new Set(WALLS.map((w) => w.id));
+    G.owned = [...new Set((Array.isArray(G.owned) ? G.owned : []).filter((id) => valid.has(id)))];
+    if (!G.owned.includes('cement')) G.owned.unshift('cement');
+    if (!valid.has(G.wall) || !G.owned.includes(G.wall)) G.wall = 'cement';
+    for (const bag of [G.decals, G.stuck, G.wallDamage]) if (bag && typeof bag === 'object') delete bag.traps;
+    if (!G.wallDamage || typeof G.wallDamage !== 'object' || Array.isArray(G.wallDamage)) G.wallDamage = {};
+    return true;
+  } catch (e) { return false; }
 }
 
 // ------------------------------------------------------------------ 자세
@@ -201,9 +214,10 @@ class Fist {
     if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
     if (st === 'stuck') { onTug(this, now); return; }
     if (st === 'pinned') { onTug(this, now); return; }
-    // 막 튕겨 나오는 중이면 조금 더 빠진 뒤에 다시 내지름 — 벽에 붙은 채 꾹꾹 누르는 것처럼 보이지 않게
-    if (st === 'idle' || (st === 'back' && this.s < 0.65)) {
+    // 연타 입력은 한 번 예약하되, 주먹이 가드까지 완전히 돌아온 뒤에만 다시 내지른다.
+    if (st === 'idle') {
       if (now < this.flinchUntil) { this.queue = 1; return; }
+      this.queue = 0;
       this.autoPunch = false;
       this.startPunch(now);
     } else this.queue = Math.min(1, this.queue + 1);
@@ -269,8 +283,10 @@ class Fist {
       case 'back': {
         this.u = Math.min(1, this.u + dt / this.dur);
         this.s = this.s0 * (1 - (this.slow ? smooth(this.u) : reboundCurve(this.u)));
-        if (this.u >= 1) { this.s = 0; this.state = 'idle'; this.slow = false; this.autoPunch = false; }
-        if (this.queue > 0 && this.s < 0.65 && now >= this.flinchUntil) { this.queue--; this.autoPunch = false; this.startPunch(now); }
+        if (this.u >= 1) {
+          this.s = 0; this.state = 'idle'; this.slow = false; this.autoPunch = false;
+          if (this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.startPunch(now); }
+        }
         break;
       }
       case 'idle': {
@@ -382,10 +398,11 @@ function onImpact(fist, now) {
   fx.lastContact = P.contact.clone();
   const react = wall.impact(fist, a, P.contact) || {};
   // 피해량
-  const base = W.dmg * rnd(0.8, 1.2) * (react.dmgMul || 1);
+  const striker = hitter(a);
+  const base = W.dmg * DAMAGE_PACE * rnd(0.8, 1.2) * (react.dmgMul || 1);
   let left = base;
   if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) {
-    const sd = W.scrapDmg * rnd(0.8, 1.25) * (react.dmgMul || 1);
+    const sd = W.scrapDmg * DAMAGE_PACE * rnd(0.8, 1.25) * (react.dmgMul || 1);
     a.damageScrap(sd, res);
     scrapBreakFx(a, res, P.contact);
     // 연결부 살도 다침(철사가 파고듦)
@@ -406,7 +423,8 @@ function onImpact(fist, now) {
   const tier = WALLS.indexOf(W) / (WALLS.length - 1);
   const feel = clamp(0.8 + tier * 0.25 + evW, 0.6, 1.9);
   fx.impact(a, P.contact, power, res, W, react);
-  fx.impactDust(P.contact, W.id, feel, hitter(a));
+  fx.impactDust(P.contact, W.id, feel, striker);
+  wall.damage(P.contact, feel, striker);
   sfx.impact(W.id, res, power, a, a.side, feel);
   for (const e of res.ev) handleEvent(a, e, P.contact);
   dropCrushed(a);
@@ -482,7 +500,7 @@ function onTug(fist, now) {
   fist.tug = 1;
   const res = { flesh: 0, scrap: 0, ev: [], point: null };
   const W = wall.def;
-  if (a.scrap && a.scrap.lumpHP > 0) { a.damageScrap(W.scrapDmg * 0.3, res); scrapBreakFx(a, res, fx.lastContact || poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.35, W.kind, res);
+  if (a.scrap && a.scrap.lumpHP > 0) { a.damageScrap(W.scrapDmg * 0.3 * DAMAGE_PACE, res); scrapBreakFx(a, res, fx.lastContact || poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.35 * DAMAGE_PACE, W.kind, res);
   const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
   addCredits(credits);
   wall.tug(fist, a);
@@ -505,7 +523,7 @@ function release(fist, now, auto) {
   const a = fist.arm;
   const res = { flesh: 0, scrap: 0, ev: [], point: null };
   const W = wall.def;
-  if (a.scrap && a.scrap.lumpHP > 0) { a.damageScrap(W.scrapDmg * 0.5, res); scrapBreakFx(a, res, poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.6, W.kind, res);
+  if (a.scrap && a.scrap.lumpHP > 0) { a.damageScrap(W.scrapDmg * 0.5 * DAMAGE_PACE, res); scrapBreakFx(a, res, poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.6 * DAMAGE_PACE, W.kind, res);
   const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
   addCredits(credits);
   wall.release(fist, a, poses(a.side, a).contact);
@@ -584,8 +602,11 @@ function armSnapshot(a) {
 
 // ------------------------------------------------------------------ 벽
 function setWall(id) {
+  const def = WALLS.find((w) => w.id === id) || WALLS[0];
+  id = def.id;
   if (wall) { fx.persist(); wall.dispose(); }
   wall = createWall(id, { scene, renderer, fx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
+  wall.loadDamage((G.wallDamage || {})[id]);
   G.wall = id;
   fx.bindWall(wall);
   // 새 벽 재질은 미리(가능하면 백그라운드로) 컴파일
@@ -694,7 +715,7 @@ function step(dt, rdt = dt) {
       if (so && so.corrode > 0 && a.scrap.lumpHP > 0) {
         so.corrode -= dt;
         const res = { flesh: 0, scrap: 0, ev: [], point: null };
-        a.damageScrap(dt * 9, res);
+        a.damageScrap(dt * 9 * DAMAGE_PACE, res);
         const n = so.onDamage('lump', fx, wall, fx.lastContact || new THREE.Vector3());
         round.scrapParts += n;
         a._corrAcc = (a._corrAcc || 0) + res.scrap * SCRAP_RATE * wall.def.mult;
@@ -710,7 +731,7 @@ function step(dt, rdt = dt) {
       const a = arms[s];
       if (a.bleed > 0 && a.I < 0.5) {
         const res = { flesh: 0, scrap: 0, ev: [], point: null };
-        a.damageFlesh(a.bleed * dt, wall.def.kind, res);
+        a.damageFlesh(a.bleed * dt * DAMAGE_PACE, wall.def.kind, res);
         const c = res.flesh * FLESH_RATE * wall.def.mult + eventCredits(res.ev) * wall.def.mult;
         a._bleedAcc = (a._bleedAcc || 0) + c;
         if (a._bleedAcc >= 1) { const n = Math.floor(a._bleedAcc); a._bleedAcc -= n; addCredits(n); }

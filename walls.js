@@ -1,4 +1,4 @@
-// 철권 — 벽 10종
+// 철권 — 벽 9종
 import * as THREE from 'three';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -8,7 +8,6 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 export const WALLS = [
   { id: 'cement', name: '시멘트 벽', desc: '기본 벽.', price: 0, mult: 1.0, dmg: 0.0115, scrapDmg: 8, fear: 0.0, kind: {} },
   { id: 'gravel', name: '자갈 박힌 벽', desc: '울퉁불퉁. 칠 때마다 살갗이 갈려 나감.', price: 1100, mult: 1.6, dmg: 0.0135, scrapDmg: 9, fear: 0.15, kind: { abr: 0.45 } },
-  { id: 'traps', name: '쥐덫 벽', desc: '덫이 손가락을 문 채 따라옴. 매달린 만큼 주먹이 느려짐.', price: 1800, mult: 2.4, dmg: 0.0145, scrapDmg: 10, fear: 0.3, kind: { fractBoost: 0.06 } },
   { id: 'glass', name: '소주병 조각 벽', desc: '유리가 손에 박힌 채 남고, 박힌 데서 피가 계속 새서 팔이 저절로 닳음.', price: 2700, mult: 3.4, dmg: 0.0150, scrapDmg: 10, fear: 0.45, kind: { cut: 0.75, punct: 1 } },
   { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 꿰여 안 빠짐. 같은 쪽을 몇 번 눌러 뜯어내야 함.', price: 3800, mult: 5.6, dmg: 0.0160, scrapDmg: 11, fear: 0.6, kind: { punct: 3 } },
   { id: 'freezer', name: '냉동창고 벽', desc: '언 쇠에 살이 쩍 들러붙음. 뗄 때 가죽이 벗겨짐.', price: 5400, mult: 6.6, dmg: 0.0170, scrapDmg: 10, fear: 0.6, kind: {} },
@@ -243,6 +242,62 @@ function stumpWound(arm, type, k, r = 0.03) {
   arm._apply();
 }
 
+// 벽에 남는 누적 타격 흔적. 벽 재질에 따라 균열·쪼개짐·덴트·움푹 패임으로 그린다.
+const SCAR_COLOR = {
+  cement: '#3d3a35', gravel: '#423b33', glass: '#173d27', nails: '#3c2818',
+  freezer: '#405866', hotplate: '#32100b', slime: '#315d18', electric: '#27343b', spikes: '#3b2b20',
+};
+const scarRng = (seed) => () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+function rgba(hex, a) {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+}
+const MAX_SCAR_HITS = 56;
+function paintWallScar(mark, id) {
+  const x = mark.ctx, N = mark.canvas.width, k = clamp(mark.hits / 48, 0.08, 1);
+  const color = SCAR_COLOR[id] || '#38332d', rand = scarRng(mark.seed);
+  const metal = id === 'freezer' || id === 'hotplate' || id === 'electric';
+  const wood = id === 'nails', slime = id === 'slime', brittle = id === 'glass';
+  x.clearRect(0, 0, N, N);
+  x.save(); x.translate(N / 2, N / 2);
+
+  if (slime) {
+    const g = x.createRadialGradient(-7, -7, 2, 0, 0, 58 + 20 * k);
+    g.addColorStop(0, 'rgba(18,55,5,.72)'); g.addColorStop(0.42, 'rgba(49,93,24,.48)'); g.addColorStop(1, 'rgba(49,93,24,0)');
+    x.fillStyle = g; x.beginPath(); x.arc(0, 0, 76, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = 'rgba(184,255,91,.34)'; x.lineWidth = 3;
+    for (let i = 0; i < 2 + Math.floor(k * 3); i++) { x.beginPath(); x.ellipse(0, 0, 25 + i * 12, 17 + i * 8, rand() * 0.5, 0, Math.PI * 2); x.stroke(); }
+  } else if (metal) {
+    const g = x.createRadialGradient(-8, -7, 3, 0, 0, 62 + 17 * k);
+    g.addColorStop(0, rgba(color, 0.76)); g.addColorStop(0.5, rgba(color, 0.42)); g.addColorStop(0.82, 'rgba(255,255,255,.16)'); g.addColorStop(1, rgba(color, 0));
+    x.fillStyle = g; x.beginPath(); x.ellipse(0, 0, 78, 57, 0, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = 'rgba(255,255,255,.27)'; x.lineWidth = 3; x.beginPath(); x.ellipse(-5, -4, 58, 40, -0.18, Math.PI * 1.05, Math.PI * 1.82); x.stroke();
+    x.strokeStyle = rgba(color, 0.7); x.lineWidth = 2;
+    for (let i = 0; i < 3 + Math.floor(k * 6); i++) { const a = rand() * Math.PI * 2, r = 22 + rand() * 45; x.beginPath(); x.moveTo(Math.cos(a) * 8, Math.sin(a) * 6); x.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.72); x.stroke(); }
+  } else {
+    const coreR = 16 + 15 * k;
+    x.fillStyle = rgba(color, 0.68); x.beginPath();
+    for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2, r = coreR * (0.72 + rand() * 0.45); const px = Math.cos(a) * r, py = Math.sin(a) * r; if (i) x.lineTo(px, py); else x.moveTo(px, py); }
+    x.closePath(); x.fill();
+    x.strokeStyle = rgba(color, brittle ? 0.82 : 0.72); x.lineWidth = brittle ? 2 : 3; x.lineCap = 'round'; x.lineJoin = 'round';
+    const spokes = 4 + Math.floor(k * (brittle ? 12 : wood ? 8 : 10));
+    for (let i = 0; i < spokes; i++) {
+      let a = i / spokes * Math.PI * 2 + (rand() - 0.5) * 0.7;
+      if (wood) a = (rand() < 0.5 ? -Math.PI / 2 : Math.PI / 2) + (rand() - 0.5) * 1.05;
+      const outer = (brittle ? 102 : wood ? 94 : 82) * (0.58 + rand() * 0.42) * (0.62 + k * 0.38);
+      let px = Math.cos(a) * coreR * 0.55, py = Math.sin(a) * coreR * 0.55;
+      x.beginPath(); x.moveTo(px, py);
+      for (let j = 1; j <= 4; j++) { a += (rand() - 0.5) * (wood ? 0.24 : 0.34); const r = coreR * 0.55 + (outer - coreR * 0.55) * j / 4; px = Math.cos(a) * r; py = Math.sin(a) * r; x.lineTo(px, py); }
+      x.stroke();
+      if (k > 0.35 && rand() < 0.65) { const ba = a + (rand() < 0.5 ? -1 : 1) * (0.35 + rand() * 0.35); x.beginPath(); x.moveTo(px * 0.62, py * 0.62); x.lineTo(px * 0.62 + Math.cos(ba) * outer * 0.25, py * 0.62 + Math.sin(ba) * outer * 0.25); x.stroke(); }
+    }
+    x.fillStyle = 'rgba(235,229,215,.3)';
+    for (let i = 0; i < 3 + Math.floor(k * 8); i++) { const a = rand() * Math.PI * 2, r = coreR + rand() * 30; x.beginPath(); x.arc(Math.cos(a) * r, Math.sin(a) * r, 1.5 + rand() * 3.2, 0, Math.PI * 2); x.fill(); }
+  }
+  x.restore();
+  mark.texture.needsUpdate = true;
+}
+
 // ------------------------------------------------------------------ 벽 공통
 class WallBase {
   constructor(def, ctx) {
@@ -252,6 +307,9 @@ class WallBase {
     this.stopDepth = 0;
     this.lights = [];
     this.disposables = [];
+    this.damageRoot = new THREE.Group();
+    this.damageMarks = [];
+    this.group.add(this.damageRoot);
   }
   basePlane(surf, opts = {}) {
     const mat = patchSurface(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: opts.metal || 0 }), surf, { key: this.def.id + '-base', bump: opts.bump || 0.8, bloodMode: opts.bloodMode });
@@ -272,12 +330,63 @@ class WallBase {
     return L;
   }
   impact() { return {}; }
+  _makeDamageMark(data) {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false, opacity: 0.7 });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    const hits = Number.isFinite(+data.hits) ? clamp(+data.hits, 0, MAX_SCAR_HITS) : 0;
+    const seed = Number.isFinite(+data.seed) ? (+data.seed >>> 0) : Math.floor(Math.random() * 0xffffffff);
+    const mark = { x: +data.x, y: +data.y, hits, seed, canvas, ctx: canvas.getContext('2d'), texture, mesh };
+    mesh.position.set(mark.x, mark.y, this.surfaceZ() + 0.002 + this.damageMarks.length * 0.0001);
+    mesh.rotation.z = ((mark.seed % 1000) / 1000 - 0.5) * 0.6;
+    mesh.renderOrder = 20 + this.damageMarks.length;
+    this.damageRoot.add(mesh); this.damageMarks.push(mark);
+    this._refreshDamageMark(mark);
+    return mark;
+  }
+  _refreshDamageMark(mark) {
+    paintWallScar(mark, this.def.id);
+    const k = clamp(mark.hits / 48, 0.08, 1), size = 0.105 + k * 0.145;
+    mark.mesh.scale.set(size, size, 1);
+    mark.mesh.material.opacity = 0.58 + k * 0.36;
+  }
+  _storeDamage() {
+    const G = this.ctx.G;
+    G.wallDamage = G.wallDamage || {};
+    G.wallDamage[this.def.id] = this.damageMarks.map((m) => ({ x: +m.x.toFixed(4), y: +m.y.toFixed(4), hits: +m.hits.toFixed(2), seed: m.seed }));
+  }
+  loadDamage(list) {
+    this.clearDamage();
+    for (const d of (Array.isArray(list) ? list : []).slice(-8)) if (d && Number.isFinite(d.x) && Number.isFinite(d.y)) this._makeDamageMark(d);
+  }
+  damage(c, feel = 1, who = 'hand') {
+    if (!c) return;
+    let mark = null, best = Infinity;
+    for (const m of this.damageMarks) {
+      const d = (m.x - c.x) ** 2 + (m.y - c.y) ** 2;
+      if (m.hits < MAX_SCAR_HITS && d < best) { best = d; mark = m; }
+    }
+    if (!mark && this.damageMarks.length >= 8) return;
+    if (!mark || (best > 0.07 ** 2 && this.damageMarks.length < 8)) {
+      const spread = this.damageMarks.length ? rnd(0.025, 0.055) : 0, a = Math.random() * Math.PI * 2;
+      mark = this._makeDamageMark({ x: c.x + Math.cos(a) * spread, y: c.y + Math.sin(a) * spread, hits: 0 });
+    }
+    mark.hits = Math.min(MAX_SCAR_HITS, mark.hits + (who === 'scrap' ? 1.4 : who === 'pipe' ? 1.2 : 0.75 + feel * 0.35));
+    this._refreshDamageMark(mark);
+    this._storeDamage();
+  }
+  clearDamage() {
+    for (const m of this.damageMarks) { this.damageRoot.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); m.texture.dispose(); }
+    this.damageMarks = [];
+  }
   tug() {}
   release() {}
   update() {}
   // 피가 튀어 묻을 표면 z
   surfaceZ() { return -this.D + this.stopDepth * 0.25; }
   dispose() {
+    this.clearDamage();
     this.ctx.scene.remove(this.group);
     this.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose && m.dispose()); });
     for (const l of this.lights) { l.intensity = 0; l.userData.busy = false; }
@@ -972,7 +1081,7 @@ function mergeGeos(gs) {
 }
 export { mergeGeos, rockGeo };
 
-const CLASSES = { cement: CementWall, gravel: GravelWall, traps: TrapWall, glass: GlassWall, nails: NailWall, freezer: FreezerWall, hotplate: HotPlateWall, slime: SlimeWall, electric: ElectricWall, spikes: SpikeWall };
+const CLASSES = { cement: CementWall, gravel: GravelWall, glass: GlassWall, nails: NailWall, freezer: FreezerWall, hotplate: HotPlateWall, slime: SlimeWall, electric: ElectricWall, spikes: SpikeWall };
 
 export function createWall(id, ctx) {
   const def = WALLS.find((w) => w.id === id) || WALLS[0];
