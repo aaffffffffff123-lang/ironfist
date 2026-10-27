@@ -141,11 +141,28 @@ attribute float aNail;
 #endif
 uniform float uSwell[${NSEG}];
 uniform float uGone[${NSEG}];
+uniform vec3 uImp;   // 충격 물결 — x: 맞은 뒤 시간(초), y: 세기, z: 물결이 시작하는 자리(바인드 z)
 varying vec3 vBind;
 flat varying float vSeg;
 varying float vAO;
 varying float vNail;
 varying float vGone;
+// 벽에 맞는 순간 손목에서 팔꿈치 쪽으로 번지는 살 물결(바깥으로 밀리는 거리)
+float impRip(float z) {
+  float zz = uImp.z - z;                          // 시작점에서 팔꿈치 쪽으로 떨어진 거리
+  float ph = uImp.x * 2.3 - zz;                   // 물결 앞머리 뒤로 얼마나 지났는지
+  float on = smoothstep(-0.008, 0.008, zz) * smoothstep(-0.006, 0.018, ph);
+  float wave = sin(ph * 72.0) * exp(-max(ph, 0.0) * 8.0);
+  return uImp.y * 0.0052 * exp(-uImp.x * 8.0) * exp(-max(zz, 0.0) * 2.6) * wave * on;
+}
+`;
+// 물결이 지나가는 자리의 법선을 기울여 빛이 따라 출렁이게
+const VERT_NORMAL = /* glsl */`
+#include <beginnormal_vertex>
+if (uImp.x < 0.42 && uImp.y > 0.0) {
+  float rp0 = impRip(position.z), rp1 = impRip(position.z + 0.0015);
+  objectNormal = normalize(objectNormal - vec3(0.0, 0.0, (rp1 - rp0) / 0.0015));
+}
 `;
 const VERT_BEGIN = /* glsl */`
 #include <begin_vertex>
@@ -162,6 +179,8 @@ vNail = aNail;
 vNail = 0.0;
 #endif
 transformed += objectNormal * uSwell[int(aSeg + 0.5)];
+// 충격파: 벽에 맞는 순간 손목에서 팔꿈치 쪽으로 살이 출렁이며 번짐
+if (uImp.x < 0.42 && uImp.y > 0.0) transformed += normal * impRip(position.z);
 #ifdef USE_SKINNING
 vGone = skinWeight.x * uGone[int(skinIndex.x + 0.5)] + skinWeight.y * uGone[int(skinIndex.y + 0.5)] + skinWeight.z * uGone[int(skinIndex.z + 0.5)] + skinWeight.w * uGone[int(skinIndex.w + 0.5)];
 #else
@@ -172,6 +191,7 @@ vGone = 0.0;
 function patchVertex(shader) {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\n' + VERT_DECL)
+    .replace('#include <beginnormal_vertex>', VERT_NORMAL)
     .replace('#include <begin_vertex>', VERT_BEGIN);
 }
 
@@ -429,6 +449,7 @@ function descendants(i) {
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
+export const SQUASH_Z = 0.1;     // 다 눌렸을 때 손 길이가 줄어드는 비율
 
 // ------------------------------------------------------------------ 팔
 export class Arm {
@@ -441,6 +462,7 @@ export class Arm {
       uWN: { value: 0 },
       uAlive: { value: new Array(NSEG).fill(1) },
       uSwell: { value: new Array(NSEG).fill(0) },
+      uImp: { value: new THREE.Vector3(9, 0, 0.015) },
       uGone: { value: new Array(NSEG).fill(0) },
       uCutZ: { value: 1.0 },
       uTime: { value: 0 },
@@ -450,6 +472,7 @@ export class Arm {
       uSSS: { value: new THREE.Color(1.0, 0.32, 0.20) },
       uSkinTint: { value: new THREE.Color().setRGB(...(new URLSearchParams(location.search).get('tint') || '0.86,0.70,0.60').split(',').map(Number)) },
     };
+    this.squash = 0;                      // 벽에 맞아 손이 눌린 정도(0~1, 게임이 매 프레임 넣음)
     this.root = new THREE.Group();        // 위치·자세 (게임이 조종)
     this.mirror = new THREE.Group();      // 오른팔은 좌우 반전
     if (side === 'R') this.mirror.scale.x = -1;
@@ -816,6 +839,9 @@ export class Arm {
       const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0.15).normalize(), this.dangle * 0.95);
       hb.quaternion.copy(q);
     } else hb.quaternion.identity();
+    // 벽에 박힌 순간 손이 앞뒤로 납작해지고 옆으로 퍼짐
+    const sq = this.I < 0.5 ? this.squash : 0;
+    hb.scale.set(this.handScale.x * (1 + 0.07 * sq), this.handScale.y * (1 + 0.05 * sq), this.handScale.z * (1 - SQUASH_Z * sq));
     // 부러진 손가락: 목표 회전으로 튐(스프링)
     for (let i = 2; i < HEADER.segs.length; i++) {
       const b = this.bones[i];

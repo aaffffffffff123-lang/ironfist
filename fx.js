@@ -7,6 +7,20 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const G_ = new THREE.Vector3(0, -9.8, 0);
 
+// 벽마다 맞을 때 날리는 먼지(dust)·부스러기(grit) — n·g: 개수, size·gs: 크기 배율, atFist: 벽면이 아니라 주먹 자리에서(꼬챙이)
+const DUST = {
+  cement:   { dust: 0xfaf8f4, grit: 0x5f5a54, n: 18, g: 12, alpha: 0.62, size: 1.25, gs: 1.0 },
+  gravel:   { dust: 0xf4f0e8, grit: 0x544f49, n: 18, g: 18, alpha: 0.6, size: 1.25, gs: 1.2 },
+  traps:    { dust: 0xfbf0dc, grit: 0x8c6438, n: 14, g: 10, alpha: 0.55, size: 1.1, gs: 1.0 },
+  glass:    { dust: 0xf6f4ef, grit: 0x2f8a4c, n: 15, g: 12, alpha: 0.55, size: 1.15, gs: 0.9 },
+  nails:    { dust: 0xfaeedb, grit: 0x6e4a2a, n: 14, g: 10, alpha: 0.55, size: 1.1, gs: 1.0 },
+  freezer:  { dust: 0xffffff, grit: 0xf4fbff, n: 20, g: 14, alpha: 0.7, size: 1.3, gs: 1.0 },
+  hotplate: { dust: 0xd9d2c8, grit: 0xffb04a, n: 0, g: 12, alpha: 0.0, size: 1.0, gs: 0.8 },   // 연기는 smokeBurst가 맡음
+  slime:    { dust: 0xd8f7b0, grit: 0x8fd23c, n: 0, g: 18, alpha: 0.0, size: 1.0, gs: 1.6 },
+  electric: { dust: 0xf2f4f6, grit: 0x7d848b, n: 10, g: 9, alpha: 0.5, size: 1.05, gs: 0.9 },
+  spikes:   { dust: 0xeee2d2, grit: 0x6b3f22, n: 8, g: 12, alpha: 0.45, size: 1.0, gs: 1.1, atFist: true },
+};
+
 // ------------------------------------------------------------------ 피 지도
 const BM_SIZE = 1024;
 class BloodMap {
@@ -184,6 +198,8 @@ class BloodMap {
 }
 
 // ------------------------------------------------------------------ 부드러운 점 입자
+// 점 크기 배율 — 화면 해상도·시야각에 맞춰 게임이 넣음(고해상도 폰에서 입자가 작아 보이지 않게)
+export const PUFF_SCALE = { value: 1 };
 function spriteTex() {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const x = c.getContext('2d', { willReadFrequently: true });
@@ -204,7 +220,7 @@ class Puffs {
     g.setAttribute('aD', new THREE.BufferAttribute(this.data, 2));
     this.mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-      uniforms: { uTex: { value: SPRITE }, uColor: { value: new THREE.Color(color) }, uScale: { value: 1 } },
+      uniforms: { uTex: { value: SPRITE }, uColor: { value: new THREE.Color(color) }, uScale: PUFF_SCALE },
       vertexShader: `attribute vec2 aD; varying float vA; uniform float uScale;
         void main(){ vec4 mv = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * mv; gl_PointSize = aD.x * uScale / -mv.z; vA = aD.y; }`,
       fragmentShader: `uniform sampler2D uTex; uniform vec3 uColor; varying float vA;
@@ -232,7 +248,8 @@ class Puffs {
         const q = this.p[i]; const k = q.t / q.life;
         this.pos[i * 3] = q.x; this.pos[i * 3 + 1] = q.y; this.pos[i * 3 + 2] = q.z;
         this.data[i * 2] = q.size * (1 + (q.grow - 1) * k) * 900;
-        this.data[i * 2 + 1] = q.a * Math.sin(Math.min(1, k * 1.0 + 0.05) * Math.PI) * (1 - k * 0.3);
+        // pop: 터지듯 바로 진하게 나타났다 사라짐(먼지·부스러기), 아니면 서서히 피었다 사라짐(연기·김)
+        this.data[i * 2 + 1] = q.a * (q.pop ? Math.min(1, k / 0.05) * Math.pow(1 - k, 1.7) : Math.sin(Math.min(1, k * 1.0 + 0.05) * Math.PI) * (1 - k * 0.3));
       } else { this.data[i * 2 + 1] = 0; this.data[i * 2] = 0; }
     }
     this.obj.geometry.attributes.position.needsUpdate = true;
@@ -331,6 +348,10 @@ export class FX {
     this.sparkB = new Puffs(200, { color: 0x9fd8ff, size: 0.005, additive: true, opacity: 1 }); scene.add(this.sparkB.obj);
     this.bubbleP = new Puffs(150, { color: 0xeaffd8, size: 0.005, opacity: 0.8 }); scene.add(this.bubbleP.obj);
     this.frost = new Puffs(150, { color: 0xf2f8ff, size: 0.012, opacity: 0.6 }); scene.add(this.frost.obj);
+    // 벽에 맞는 순간 터지는 먼지·부스러기(색은 벽마다)
+    this.dust = new Puffs(160, { color: 0xe4ded3, size: 0.014, opacity: 0.4 }); scene.add(this.dust.obj);
+    this.grit = new Puffs(200, { color: 0x77716a, size: 0.003, opacity: 0.95 }); scene.add(this.grit.obj);
+    this.dust.obj.renderOrder = 5; this.grit.obj.renderOrder = 5;
     this.ambient = [];
     this.wall = null;
     this.armRefs = null;
@@ -344,6 +365,8 @@ export class FX {
     // 이전 벽의 피·살점 저장 → 새 벽 불러오기
     if (this.wall) this.saveWall(this.wall.def.id);
     this.wall = wall;
+    const dc = DUST[wall.def.id];
+    if (dc) { this.dust.mat.uniforms.uColor.value.set(dc.dust); this.grit.mat.uniforms.uColor.value.set(dc.grit); }
     this.stuckGibs = []; this.stuckScrap = [];
     this.blood.load((this.G.decals || {})[wall.def.id]);
     this.loadStuck((this.G.stuck || {})[wall.def.id]);
@@ -368,12 +391,13 @@ export class FX {
       blood *= 0.35;
     }
     const cx = c.x, cy = c.y;
-    if (blood > 0.12) {
+    const fistPrint = !scrapHit && arm.I < 0.5;
+    // 살 주먹은 첫 대부터 옅은 너클 자국(살갗이 쓸린 자리)이 남고 칠수록 진해짐
+    if (blood > 0.12 || (fistPrint && W.id !== 'slime' && W.id !== 'spikes')) {
       // 타격면 핏자국
       // 살 주먹이면 너클 자국(가로로 눕힘, 팔 쪽으로 살짝 기울임), 아니면 그냥 튄 피
-      const fistPrint = !scrapHit && arm.I < 0.5;
       const tilt = (arm.side === 'L' ? -1 : 1) * rnd(0.05, 0.3);
-      this.blood.splat(cx + rnd(-0.008, 0.008), cy + rnd(-0.008, 0.008), (fistPrint ? 0.03 : 0.012) + blood * (fistPrint ? 0.012 : 0.022), { dark: Math.random() * 0.3, knuckle: fistPrint, rot: fistPrint ? tilt : undefined, alpha: clamp(0.3 + blood * 0.9, 0.3, 0.95) });
+      this.blood.splat(cx + rnd(-0.008, 0.008), cy + rnd(-0.008, 0.008), (fistPrint ? 0.03 : 0.012) + blood * (fistPrint ? 0.012 : 0.022), { dark: Math.random() * 0.3, knuckle: fistPrint, rot: fistPrint ? tilt : undefined, alpha: fistPrint ? clamp(0.22 + blood * 1.6, 0.22, 0.95) : clamp(0.3 + blood * 0.9, 0.3, 0.95) });
       // 흘러내림: 언 벽은 짧게 얼어붙고, 달군 철판은 지글지글 말라 버림
       const dripK = W.id === 'freezer' ? 0.22 : W.id === 'hotplate' ? 0.12 : W.id === 'slime' ? 0 : 1;
       if (dripK && blood > 0.6 && Math.random() < 0.45) this.blood.drip(cx + rnd(-0.02, 0.02), cy - rnd(0.0, 0.015), rnd(0.05, 0.22) * dripK, rnd(0.002, 0.0045));
@@ -394,6 +418,30 @@ export class FX {
     // 벽 성격별
     if (W.id === 'hotplate') this.smokeBurst(c, 1 + power * 0.5);
     if (W.id === 'gravel' && arm.I < 0.5) for (let i = 0; i < 3; i++) this.chunk(c, wallZ, 'skin', rnd(0.0015, 0.003));
+  }
+
+  // 벽에 닿는 순간: 먼지가 확 퍼지고 부스러기가 튐 (feel: 타격 세기 0.6~1.9)
+  impactDust(c, wallId, feel, who) {
+    const d = DUST[wallId];
+    if (!d) return;
+    const k = Math.min(1.5, feel);
+    const z = (d.atFist ? c.z : this.wall.surfaceZ()) + 0.004;
+    const nD = Math.round(d.n * 1.5 * (0.75 + 0.35 * k) * (who === 'scrap' ? 1.3 : 1));
+    for (let i = 0; i < nD; i++) {
+      // 주먹 그림자에 가리지 않게 벽면을 따라 빠르게 고리처럼 퍼지고, 몇 개는 천천히 피어올라 좀 더 남음
+      const slow = i % 4 === 0;
+      const a = (i / nD) * Math.PI * 2 + rnd(-0.3, 0.3), sp = (slow ? rnd(0.15, 0.4) : rnd(0.8, 2.1)) * (0.8 + 0.3 * k);
+      this.dust.emit({ x: c.x + rnd(-0.012, 0.012), y: c.y + rnd(-0.01, 0.01), z: z + rnd(0, 0.01),
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.75 + rnd(-0.03, 0.12), vz: slow ? rnd(0.15, 0.45) : rnd(0.03, 0.25),
+        drag: 0.0009, g: -0.25, life: slow ? rnd(0.65, 1.0) : rnd(0.3, 0.55), size: rnd(0.016, 0.03) * d.size, grow: slow ? 2.8 : 3.4, a: d.alpha * rnd(0.8, 1), pop: 1 });
+    }
+    const nG = Math.round(d.g * (0.7 + 0.4 * k));
+    for (let i = 0; i < nG; i++) {
+      const a = Math.random() * Math.PI * 2, sp = rnd(0.45, 1.5) * (0.85 + 0.25 * k);
+      this.grit.emit({ x: c.x + rnd(-0.008, 0.008), y: c.y + rnd(-0.006, 0.006), z: z + 0.002,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 + rnd(0.1, 0.6), vz: rnd(0.15, 0.9),
+        drag: 0.35, g: -7.5, life: rnd(0.3, 0.6), size: rnd(0.0018, 0.0036) * d.gs, grow: 1, a: 0.95, pop: 1 });
+    }
   }
 
   spawnDrop(x, y, z, vx, vy, vz, r) {
@@ -573,7 +621,8 @@ export class FX {
   makeArcs() { const A = new Arcs(); return { obj: A.obj, burst: (c, n, D) => A.burst(c, n, D), idle: (D) => A.idle(D), update: (dt) => A.update(dt) }; }
 
   // ------------------------------------------------ 매 프레임
-  update(dt, time) {
+  // rdt: 실제 시간 — 먼지·부스러기는 멈춤(히트스톱) 중에도 터져 나감
+  update(dt, time, rdt = dt) {
     SHARED.uTime.value = time;
     const wallZ = this.wall ? this.wall.surfaceZ() : -0.62;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), dir = new THREE.Vector3();
@@ -633,5 +682,6 @@ export class FX {
     this.flying = keep;
     this.blood.update(dt, time);
     this.smoke.update(dt); this.steam.update(dt); this.sparkP.update(dt); this.sparkB.update(dt); this.bubbleP.update(dt); this.frost.update(dt);
+    this.dust.update(rdt); this.grit.update(rdt);
   }
 }

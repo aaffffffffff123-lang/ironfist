@@ -1,9 +1,9 @@
 // 철권 — 메인
 import * as THREE from 'three';
 import { RoomEnvironment } from './room-env.js';
-import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT } from './arm.js';
-import { WALLS, createWall } from './walls.js';
-import { FX } from './fx.js';
+import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT, SQUASH_Z } from './arm.js';
+import { WALLS, createWall, hitter } from './walls.js';
+import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
 import { Scrap } from './scrap.js';
 import { UI } from './ui.js';
@@ -11,10 +11,16 @@ import { UI } from './ui.js';
 const WALL_D = 0.62;                 // 카메라 → 벽 거리
 const FLESH_RATE = 400;              // 살 손실 1.0 당 크레딧(벽 배율 전)
 const SCRAP_RATE = 1.2;              // 고철 HP 1 당 크레딧
+// 타격감
+const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
+const BACK_T = 0.2;                  // 벽에서 튕겨 가드로 돌아오는 시간
+const HOLD_T = 0.012;                // 멈춤이 풀린 뒤 벽에 붙어 있는 시간
+const HS_SLOW = 0.03;                // 멈춤(히트스톱) 동안 시간 흐름 배율
+const D2R = Math.PI / 180;
 const $ = (s) => document.querySelector(s);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const ease = (t) => 1 - Math.pow(1 - t, 3);
+const smooth = (u) => u * u * (3 - 2 * u);
 
 // ------------------------------------------------------------------ 렌더러
 const canvas = $('#c');
@@ -74,8 +80,10 @@ const G = {
 let assets, arms = {}, wall = null, fx, sfx, ui;
 let mode = 'title';      // title | play | over | shop
 let round = null;
-let time = 0, hitstop = 0, shake = 0, xray = 0;
+let time = 0, rtime = 0, hitstop = 0, xray = 0;
+let rush = 0;            // 최근 연타 정도 — 연타할수록 멈춤·흔들림을 줄여 답답하지 않게
 let layout = { portrait: false, k: 1 };
+let baseFov = 58;
 
 function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch (e) {}
@@ -86,6 +94,7 @@ function load() {
 
 // ------------------------------------------------------------------ 자세
 const tmpM = new THREE.Matrix4(), tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+const AX_X = new THREE.Vector3(1, 0, 0);
 function basisQuat(D, U) {
   const z = D.clone().normalize();
   const y = U.clone().addScaledVector(z, -U.dot(z)).normalize();
@@ -120,36 +129,100 @@ function poses(side, armObj) {
   return { p0, q0, p1, q1, D1: s < 0 ? new THREE.Vector3(-D1.x, D1.y, D1.z) : D1, contact };
 }
 
+// ------------------------------------------------------------------ 동작 곡선
+// 내지르기: 처음 한두 프레임 살짝 당겼다가(반동) 점점 빨라져, 가장 빠를 때 벽에 꽂힘
+function strikeCurve(u, wind) {
+  const a = Math.pow(u, 2.1);
+  return wind ? a - 0.07 * Math.sin(Math.PI * Math.min(1, u / 0.45)) * (1 - u) : a;
+}
+// 튕겨 나오기: 처음이 가장 빠르고, 가드 자리를 살짝 지나쳤다 돌아옴
+function reboundCurve(u) { const c1 = 1.15, c3 = c1 + 1, v = u - 1; return 1 + c3 * v * v * v + c1 * v * v; }
+
+// ------------------------------------------------------------------ 화면 반동
+// 실제 시간으로 흐름 → 히트스톱으로 세상이 멈춰도 화면은 충격으로 출렁임
+class Spring {
+  constructor(hz, zeta) { this.w = Math.PI * 2 * hz; this.k = this.w * this.w; this.c = 2 * zeta * this.w; this.x = 0; this.v = 0; }
+  kick(peak) { this.v += peak * this.w / 0.6; }   // 대략 peak 만큼 튀었다 돌아옴
+  step(dt) { const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n; for (let i = 0; i < n; i++) { this.v += (-this.k * this.x - this.c * this.v) * h; this.x += this.v * h; } }
+  reset() { this.x = 0; this.v = 0; }
+}
+const cam = {
+  trauma: 0,                                         // 흔들림(0~1, 실제 시간으로 잦아듦)
+  pitch: new Spring(8, 0.42), yaw: new Spring(7, 0.45), roll: new Spring(7.5, 0.42),
+  push: new Spring(9, 0.5), fov: new Spring(8, 0.5),
+  ph: Array.from({ length: 6 }, () => Math.random() * 100),
+};
+const CAM_SPRINGS = [cam.pitch, cam.yaw, cam.roll, cam.push, cam.fov];
+// 주먹이 벽에 꽂힌 순간: 고개가 앞으로 꾸벅, 친 쪽으로 몸이 돌고 기울며, 화면이 확 당겨짐
+function camKick(side, feel, evW) {
+  const sg = side === 'L' ? 1 : -1;
+  const k = Math.min(1.6, feel), r = 1 / (1 + 0.28 * rush);
+  cam.trauma = Math.min(1, cam.trauma + (0.32 + 0.2 * (k - 0.8)) * r + evW * 0.4);
+  cam.pitch.kick(-(0.6 + 0.35 * (k - 0.8) + evW * 0.5) * r * D2R);
+  cam.yaw.kick(sg * (0.35 + 0.15 * (k - 0.8)) * r * D2R);
+  cam.roll.kick(-sg * (0.75 + 0.35 * (k - 0.8) + evW * 0.5) * r * D2R);
+  cam.push.kick(-(0.005 + 0.002 * (k - 0.8)) * r);
+  cam.fov.kick(-(2.0 + 0.8 * (k - 0.8)) * r - evW * 1.5);
+}
+// 박힌 손을 뜯어낼 때 몸이 뒤로 젖혀짐
+function camPull(side) {
+  const sg = side === 'L' ? 1 : -1;
+  cam.trauma = Math.min(1, cam.trauma + 0.32);
+  cam.pitch.kick(0.55 * D2R); cam.roll.kick(sg * 0.5 * D2R); cam.push.kick(0.006); cam.fov.kick(1.2);
+}
+// 박힌 채로 버둥
+function camTug(side) {
+  cam.trauma = Math.min(1, cam.trauma + 0.1);
+  cam.roll.kick((side === 'L' ? 1 : -1) * 0.2 * D2R); cam.push.kick(0.0015);
+}
+function camUpdate(rdt) {
+  cam.trauma = Math.max(0, cam.trauma - rdt * 2.4);
+  for (const s of CAM_SPRINGS) s.step(rdt);
+}
+
 // ------------------------------------------------------------------ 팔 컨트롤러
 class Fist {
   constructor(arm) {
     this.arm = arm;
     this.state = 'idle';
-    this.t = 0;           // 0=휴식, 1=타격
+    this.s = 0;              // 뻗은 정도: 0 가드 ~ 1 벽에 닿음
+    this.u = 0; this.s0 = 0; this.dur = STRIKE_T; this.wind = 0; this.slow = false;
     this.queue = 0;
-    this.stuckTaps = 0; this.pinT = 0; this.sinkT = 0; this.spasm = 0; this.spasmT = 0;
+    this.stuckTaps = 0; this.pinT = 0; this.sinkT = 0; this.sinkD = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
     this.flinchUntil = 0;
-    this.recoil = 0; this.tug = 0; this.tremble = 0;
+    this.tug = 0; this.tremble = 0;
     this.lastPress = -9;
+    // 맞은 순간의 느낌 — 실제 시간으로 흐름(히트스톱 동안에도 떨림·눌림이 보이게)
+    this.impT = 9; this.impA = 0; this.impDir = new THREE.Vector3(1, 0, 0); this.jit = new THREE.Vector3(); this._jf = false;
+    this.comp = 0; this.compT = 0; this.push = 0.009; this.squashK = 1;
+    this.ripA = 0; this.ripZ = 0.016;
+    this.flick = 0; this.flickV = 0;     // 손목 튕김 스프링(라디안)
   }
   press(now) {
     const st = this.state;
     if (mode !== 'play') return;
-    if (!this.arm.canPunch()) { this.recoil = 0.25; sfx.play('stumpTwitch', 0.2); return; }
+    if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
     if (st === 'stuck') { onTug(this, now); return; }
     if (st === 'pinned') { onTug(this, now); return; }
-    if (st === 'idle' || st === 'back') {
+    // 막 튕겨 나오는 중이면 조금 더 빠진 뒤에 다시 내지름 — 벽에 붙은 채 꾹꾹 누르는 것처럼 보이지 않게
+    if (st === 'idle' || (st === 'back' && this.s < 0.65)) {
       if (now < this.flinchUntil) { this.queue = 1; return; }
+      this.autoPunch = false;
       this.startPunch(now);
     } else this.queue = Math.min(1, this.queue + 1);
   }
   startPunch(now) {
     this.state = 'out';
-    this.outStart = this.t;
+    this.s0 = this.s; this.u = 0;
+    this.wind = !this.autoPunch && this.s < 0.15 ? 1 : 0;
+    // 덜 돌아온 데서 다시 치면 거리가 짧은 만큼 빨리 닿음
+    this.dur = (this.autoPunch ? 0.07 : STRIKE_T) * (0.45 + 0.55 * clamp(1 - this.s0, 0, 1.1)) / this.speed();
     this.lastPress = now;
     registerPunch(this, now);
-    sfx.play('whoosh', 0.35 + Math.random() * 0.15);
+    sfx.whoosh(this.arm.side, this.dur, this.autoPunch ? 0.18 : 0.3);
   }
+  goBack(dur, slow = false) { this.state = 'back'; this.s0 = this.s; this.u = 0; this.dur = dur; this.slow = slow; }
+  get t() { return clamp(this.s, 0, 1); }   // 벽(슬라임 움푹 패임)이 읽는 뻗은 정도
   speed() {
     let s = 1;
     const a = this.arm;
@@ -158,16 +231,21 @@ class Fist {
     return s;
   }
   update(dt, now) {
-    const a = this.arm;
     switch (this.state) {
       case 'out': {
-        this.t = Math.min(1, this.t + dt / (0.105 / this.speed()));
-        if (this.t >= 1) { this.state = 'hit'; this.hold = 0.055; onImpact(this, now); }
+        this.u = Math.min(1, this.u + dt / this.dur);
+        this.s = this.s0 + (1 - this.s0) * strikeCurve(this.u, this.wind);
+        if (this.u >= 1) { this.s = 1; this.state = 'hit'; this.hold = HOLD_T; onImpact(this, now); }
         break;
       }
       case 'hit': {
         this.hold -= dt;
-        if (this.hold <= 0 && this.state === 'hit') this.state = 'back';
+        if (this.hold <= 0 && this.state === 'hit') {
+          // 남은 시간만큼 바로 튕겨 나감(벽에 한 프레임 더 붙어 있지 않게)
+          const over = -this.hold;
+          this.goBack(BACK_T);
+          this.u = Math.min(1, over / this.dur); this.s = this.s0 * (1 - reboundCurve(this.u));
+        }
         break;
       }
       case 'stuck': case 'pinned': {
@@ -177,49 +255,91 @@ class Fist {
       }
       case 'sink': {
         this.sinkT -= dt;
-        if (this.sinkT <= 0) { this.state = 'back'; this.slowBack = 0.55; sfx.play('suction', 0.7); }
+        if (this.sinkT <= 0) { this.goBack(0.55, true); sfx.play('suction', 0.7); }
         break;
       }
       case 'spasm': {
+        // 감전: 살짝 튕겨 나왔다가 혼자 다시 꽂힘
         this.spasmT -= dt;
+        const k = clamp(1 - Math.max(0, this.spasmT) / this.spasmT0, 0, 1);
+        this.s = 1 - (this.spasm > 0 ? 0.45 : 0.2) * smooth(k);
         if (this.spasmT <= 0) {
-          if (this.spasm > 0) { this.spasm--; this.state = 'out'; this.t = 0.55; this.spasmT = 0; this.autoPunch = true; }
-          else this.state = 'back';
+          if (this.spasm > 0) { this.spasm--; this.autoPunch = true; this.startPunch(now); }
+          else this.goBack(BACK_T);
         }
         break;
       }
       case 'back': {
-        const dur = this.slowBack || 0.16;
-        this.t = Math.max(0, this.t - dt / dur);
-        if (this.t <= 0) { this.state = 'idle'; this.slowBack = 0; this.autoPunch = false; }
-        if (this.queue > 0 && this.t < 0.65 && now >= this.flinchUntil) { this.queue--; this.startPunch(now); }
+        this.u = Math.min(1, this.u + dt / this.dur);
+        this.s = this.s0 * (1 - (this.slow ? smooth(this.u) : reboundCurve(this.u)));
+        if (this.u >= 1) { this.s = 0; this.state = 'idle'; this.slow = false; this.autoPunch = false; }
+        if (this.queue > 0 && this.s < 0.65 && now >= this.flinchUntil) { this.queue--; this.autoPunch = false; this.startPunch(now); }
         break;
       }
       case 'idle': {
-        if (this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.startPunch(now); }
+        if (this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.autoPunch = false; this.startPunch(now); }
         break;
       }
     }
-    this.recoil = Math.max(0, this.recoil - dt * 4);
+    // 슬라임에 빨려 든 깊이: 빨려 들 땐 점점 깊이, 빠질 땐 쑥 빠짐
+    if (this.state === 'sink') this.sinkD = 0.04 * (1 - Math.max(0, this.sinkT) / 0.4);
+    else this.sinkD = Math.max(0, this.sinkD - dt * 0.3);
+    // 손목 튕김 스프링(시뮬레이션 시간: 멈춤 동안 그대로 있다가 풀리며 튐)
+    const k = 560, c = 2 * 0.48 * Math.sqrt(k);
+    this.flickV += (-k * this.flick - c * this.flickV) * dt; this.flick += this.flickV * dt;
     this.tug = Math.max(0, this.tug - dt * 6);
+  }
+  // 벽에 꽂힌 순간의 느낌 설정 (hs: 이번 멈춤 길이)
+  hitFeel(feel, react, a, hs) {
+    const who = hitter(a);
+    const P = poses(a.side, a);
+    this.impT = 0;
+    tmpV.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+    tmpV.addScaledVector(P.D1, -tmpV.dot(P.D1));
+    if (tmpV.lengthSq() < 1e-8) tmpV.set(1, 0, 0);
+    this.impDir.copy(tmpV.normalize());
+    this.impA = 0.0065 * feel * (who === 'scrap' ? 1.3 : 1);
+    // 살 주먹은 손이 납작해지는 만큼 팔이 더 들어감(앞면은 벽에 붙은 채)
+    this.push = who === 'hand' ? 0.097 * SQUASH_Z + 0.0008 : who === 'scrap' ? 0.0025 : 0.004;
+    this.squashK = who === 'hand' ? 1 : 0;
+    this.compT = react.stick === 'sink' ? 0 : hs + 0.03;
+    this.ripA = (who === 'hand' ? 1 : 0.75) * Math.min(1.5, feel);
+    this.ripZ = who === 'hand' ? 0.016 : Math.min(a.cutZ, 0.0) - 0.004;
+    if (!react.stick) this.flickV -= 1.5 + 0.9 * feel;
+  }
+  // 실제 시간으로 흐르는 부분: 눌림, 떨림
+  feel(rdt) {
+    this.impT += rdt;
+    const want = (this.state === 'hit' || (this.impT < this.compT && this.state !== 'back' && this.state !== 'out')) ? 1 : 0;
+    this.comp += (want - this.comp) * Math.min(1, rdt / (want ? 0.01 : 0.03));
+    // 떨림: 프레임마다 방향을 뒤집으며 부르르, 금방 잦아듦
+    const e = this.impT < 0.3 ? Math.exp(-this.impT / 0.06) : 0;
+    if (e > 0.002) { this._jf = !this._jf; this.jit.copy(this.impDir).multiplyScalar((this._jf ? 1 : -1) * this.impA * e * (0.7 + 0.3 * Math.random())); }
+    else this.jit.set(0, 0, 0);
   }
   pose(out) {
     const P = poses(this.arm.side, this.arm);
-    const t = this.state === 'out' ? ease(this.t) : (this.state === 'back' ? this.t * this.t * (3 - 2 * this.t) : this.t);
-    out.position.lerpVectors(P.p0, P.p1, t);
+    const s = this.s, sc = clamp(s, 0, 1);
+    out.position.lerpVectors(P.p0, P.p1, s);
     // 휘두르는 호
-    out.position.y += Math.sin(t * Math.PI) * 0.02;
-    out.quaternion.slerpQuaternions(P.q0, P.q1, t);
-    // 반동·당기기·떨림
-    const back = this.recoil * 0.03 + this.tug * 0.02;
-    out.position.addScaledVector(P.D1, -back);
-    if (this.state === 'sink') out.position.addScaledVector(P.D1, 0.04 * (1 - Math.max(0, this.sinkT) / 0.4));
+    out.position.y += Math.sin(sc * Math.PI) * 0.018;
+    out.quaternion.slerpQuaternions(P.q0, P.q1, sc);
+    // 반동: 내지르기 직전 손목을 살짝 젖힘
+    if (this.state === 'out' && this.wind) { const w = Math.sin(Math.PI * Math.min(1, this.u / 0.45)) * (1 - this.u); tmpQ.setFromAxisAngle(AX_X, -0.12 * w); out.quaternion.multiply(tmpQ); }
+    // 손목 튕김: 맞고 나서 주먹이 들리며 팔이 휨
+    if (this.flick) { tmpQ.setFromAxisAngle(AX_X, this.flick); out.quaternion.multiply(tmpQ); }
+    // 눌림 + 충격 떨림
+    out.position.addScaledVector(P.D1, this.comp * this.push);
+    out.position.add(this.jit);
+    // 당기기·빨려 듦·버둥
+    out.position.addScaledVector(P.D1, -this.tug * 0.02 + this.sinkD);
     if (this.state === 'pinned') out.position.addScaledVector(P.D1, -0.004 * Math.sin(time * 60) * this.tug);
+    // 겁나서 떨림
     const tr = this.tremble * (0.0012 + this.arm.I * 0.002);
     out.position.x += Math.sin(time * 37 + (this.arm.side === 'L' ? 0 : 2)) * tr;
     out.position.y += Math.sin(time * 41.3 + 1) * tr;
     // 숨 쉬는 듯한 미세한 움직임
-    out.position.y += Math.sin(time * 1.7 + (this.arm.side === 'L' ? 0 : 1.3)) * 0.0025 * (1 - t);
+    out.position.y += Math.sin(time * 1.7 + (this.arm.side === 'L' ? 0 : 1.3)) * 0.0025 * (1 - sc);
   }
 }
 
@@ -268,7 +388,6 @@ function onImpact(fist, now) {
   let left = base;
   if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) {
     const sd = W.scrapDmg * rnd(0.8, 1.25) * (react.dmgMul || 1);
-    const before = a.scrap.lumpHP;
     a.damageScrap(sd, res);
     scrapBreakFx(a, res, P.contact);
     // 연결부 살도 다침(철사가 파고듦)
@@ -283,24 +402,31 @@ function onImpact(fist, now) {
   const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
   if (fist.pendingChain) { const l = fist.pendingChain; l.credits = credits; l.done = true; fist.pendingChain = null; if (l.group) payTkd(l.group); }
   addCredits(credits);
-  // 연출
+  // 연출 — power: 피·살점 양, feel: 손맛(멈춤·화면 반동·떨림)
   const power = clamp(0.4 + res.flesh * 40 + res.ev.length * 0.3, 0.3, 1.6);
+  const evW = eventWeight(res.ev);
+  const tier = WALLS.indexOf(W) / (WALLS.length - 1);
+  const feel = clamp(0.8 + tier * 0.25 + evW, 0.6, 1.9);
   fx.impact(a, P.contact, power, res, W, react);
-  sfx.impact(W.id, res, power, a);
+  fx.impactDust(P.contact, W.id, feel, hitter(a));
+  sfx.impact(W.id, res, power, a, a.side, feel);
   for (const e of res.ev) handleEvent(a, e, P.contact);
   a.kick(power);
-  fist.recoil = react.stick ? 0 : 0.6;
-  hitstop = Math.max(hitstop, react.stick ? 0.03 : 0.045 + (res.ev.some((e) => e.t === 'fract') ? 0.05 : 0));
-  shake = Math.max(shake, 0.35 + power * 0.25);
-  vibrate(res.ev.length ? 28 : 12);
+  // 멈춤: 연타 중엔 짧게, 뼈가 부러지거나 떨어져 나가면 길게
+  const hs = (react.stick ? 0.045 : 0.052 + tier * 0.014) / (1 + 0.35 * rush) + Math.min(0.09, evW * 0.12);
+  hitstop = Math.max(hitstop, hs);
+  fist.hitFeel(feel, react, a, hs);
+  camKick(a.side, feel, evW);
+  rush = Math.min(6, rush + 1);
+  vibrate(res.ev.length ? [30, 25, 30] : Math.round(16 + feel * 10));
   round.punches++;
   // 걸림 상태
   if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckTaps = react.taps || 3; fist.stuckT = 0; showHint('stuck'); }
   else if (react.stick === 'pinned') { fist.state = 'pinned'; fist.pinT = react.pin || 2; fist.stuckTaps = 99; showHint('pinned'); }
   else if (react.stick === 'sink') { fist.state = 'sink'; fist.sinkT = react.sink || 0.4; }
-  else if (react.spasm && !fist.autoPunch) { fist.state = 'spasm'; fist.spasm = react.spasm; fist.spasmT = 0.06; }
-  else if (fist.autoPunch && fist.spasm > 0) { fist.state = 'spasm'; fist.spasmT = 0.07; }
-  else if (fist.autoPunch) { fist.state = 'spasm'; fist.spasmT = 0.05; }
+  else if (react.spasm && !fist.autoPunch) { fist.state = 'spasm'; fist.spasm = react.spasm; fist.spasmT = fist.spasmT0 = 0.06; }
+  else if (fist.autoPunch && fist.spasm > 0) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.07; }
+  else if (fist.autoPunch) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.05; }
   if (react.flinch) fist.flinchUntil = now + react.flinch;
   checkRoundEnd();
 }
@@ -311,6 +437,12 @@ function eventCredits(evs) {
     c += { fract: 15, nail: 10, finger: 25, wrist: 30, hand: 60, stump: 4, lumpGone: 8, pipeGone: 5 }[e.t] || 0;
   }
   return c;
+}
+// 사건이 클수록 손맛을 키움
+function eventWeight(evs) {
+  let w = 0;
+  for (const e of evs) w += { fract: 0.32, nail: 0.12, finger: 0.42, wrist: 0.45, hand: 0.7, stump: 0.08, lumpGone: 0.3, pipeGone: 0.2 }[e.t] || 0;
+  return Math.min(1, w);
 }
 
 function handleEvent(a, e, contact) {
@@ -340,7 +472,8 @@ function onTug(fist, now) {
   wall.tug(fist, a);
   sfx.play('tear', 0.55 + Math.random() * 0.2);
   for (const e of res.ev) handleEvent(a, e, null);
-  vibrate(10);
+  camTug(a.side);
+  vibrate(14);
   if (fist.state === 'stuck') {
     fist.stuckTaps--;
     if (fist.stuckTaps <= 0) release(fist, now, false);
@@ -361,10 +494,11 @@ function release(fist, now, auto) {
   wall.release(fist, a, poses(a.side, a).contact);
   sfx.play('rip', 0.9);
   for (const e of res.ev) handleEvent(a, e, null);
-  fist.state = 'back'; fist.slowBack = 0.22;
-  fist.recoil = 1;
+  // 확 뜯겨 나옴
+  fist.goBack(0.24);
+  fist.flickV += 2.4;
   hitstop = Math.max(hitstop, 0.05);
-  shake = Math.max(shake, 0.4);
+  camPull(a.side);
   vibrate(30);
   checkRoundEnd();
 }
@@ -380,7 +514,12 @@ function addCredits(n, bonus) {
 function newRound() {
   round = { punches: 0, earned: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false, endT: 0 };
   chain = [];
-  for (const f of Object.values(fists)) { f.state = 'idle'; f.t = 0; f.queue = 0; }
+  for (const f of Object.values(fists)) {
+    f.state = 'idle'; f.s = 0; f.u = 0; f.queue = 0; f.autoPunch = false;
+    f.comp = 0; f.compT = 0; f.flick = 0; f.flickV = 0; f.impT = 9; f.sinkD = 0; f.tug = 0; f.jit.set(0, 0, 0);
+  }
+  hitstop = 0; rush = 0; cam.trauma = 0;
+  for (const s of CAM_SPRINGS) s.reset();
 }
 
 function checkRoundEnd() {
@@ -445,7 +584,7 @@ canvas.addEventListener('touchstart', (e) => {
   for (const t of e.changedTouches) pressSide(t.clientX < innerWidth / 2 ? 'L' : 'R');
 }, { passive: false });
 
-function vibrate(ms) { try { if (navigator.vibrate && G.vibrate !== false) navigator.vibrate(ms); } catch (e) {} }
+function vibrate(p) { try { if (navigator.vibrate && G.vibrate !== false) navigator.vibrate(p); } catch (e) {} }
 
 // ------------------------------------------------------------------ 힌트
 function showHint(id) {
@@ -460,7 +599,8 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   layout.portrait = w / h < 0.9;
-  camera.fov = layout.portrait ? 74 : 58;
+  baseFov = layout.portrait ? 74 : 58;
+  camera.fov = baseFov + cam.fov.x;
   camera.updateProjectionMatrix();
   camera.position.set(0, 0, 0);
   camera.lookAt(0, -0.075, -1);
@@ -486,25 +626,34 @@ function adaptRes(raw) {
 function frame(nowMs) {
   requestAnimationFrame(frame);
   if (manual) { last = nowMs; return; }
-  const raw = (nowMs - last) / 1000;
+  const raw = Math.max(0, (nowMs - last) / 1000);
   adaptRes(raw);
-  let dt = Math.min(0.05, raw); last = nowMs;
-  if (hitstop > 0) { hitstop -= dt; dt *= 0.08; }
-  time += dt;
-  step(dt);
+  last = nowMs;
+  advance(Math.min(0.05, raw));
   render();
 }
+// 한 걸음: 멈춤(히트스톱) 동안은 세상 시간만 거의 멈추고, 화면 반동·주먹 떨림은 실제 시간으로 흐름
+function advance(rdt) {
+  let dt = rdt;
+  if (hitstop > 0) { const h = Math.min(hitstop, rdt); hitstop -= rdt; dt = rdt - h + h * HS_SLOW; }
+  time += dt; rtime += rdt;
+  rush = Math.max(0, rush - rdt * 2.5);
+  step(dt, rdt);
+}
 
-function step(dt) {
+function step(dt, rdt = dt) {
   for (const s of ['L', 'R']) {
-    const f = fists[s];
+    const f = fists[s], A = arms[s];
     f.tremble = wall ? wall.def.fear : 0;
     f.update(dt, time);
+    f.feel(rdt);
     f.pose(_pos);
-    arms[s].root.position.copy(_pos.position);
-    arms[s].root.quaternion.copy(_pos.quaternion);
-    arms[s].update(dt, time);
-    if (arms[s].scrapObj) arms[s].scrapObj.update(dt, time);
+    A.root.position.copy(_pos.position);
+    A.root.quaternion.copy(_pos.quaternion);
+    A.squash = f.comp * f.squashK;
+    A.U.uImp.value.set(f.impT, f.ripA, f.ripZ);
+    A.update(dt, time);
+    if (A.scrapObj) A.scrapObj.update(dt, time);
   }
   // 슬라임 산에 고철이 삭음
   if (mode === 'play' && round && !round.ended) {
@@ -539,18 +688,29 @@ function step(dt) {
     }
   }
   if (wall) wall.update(dt, time, arms, fists);
-  fx.update(dt, time);
+  fx.update(dt, time, rdt);
   xray = Math.max(0, xray - dt * 4.5);
   for (const s of ['L', 'R']) arms[s].U.uXray.value = Math.min(1, xray * 1.4);
   xrayVeil.material.opacity = Math.min(0.82, xray * 1.1);
-  shake = Math.max(0, shake - dt * 5);
+  camUpdate(rdt);
 }
 
 let freeCam = null;   // 디버그: {p, t}
+const _dbs = new THREE.Vector2();
 function render() {
-  const s = shake * shake;
-  camera.position.set((Math.random() - 0.5) * 0.004 * s, (Math.random() - 0.5) * 0.004 * s, 0);
+  camera.position.set(0, 0, 0);
   camera.lookAt(0, -0.075, -1);
+  // 반동(스프링) + 흔들림(trauma) — 카메라 자기 축 기준
+  const a = Math.pow(cam.trauma, 1.5), t = rtime, P = cam.ph;
+  const nz = (i, f1, f2) => Math.sin(t * f1 + P[i]) * 0.62 + Math.sin(t * f2 + P[i + 3]) * 0.38;
+  camera.translateZ(cam.push.x);
+  camera.rotateX(cam.pitch.x + a * 1.0 * D2R * nz(0, 107, 163));
+  camera.rotateY(cam.yaw.x + a * 0.75 * D2R * nz(1, 97, 151));
+  camera.rotateZ(cam.roll.x + a * 1.4 * D2R * nz(2, 113, 173));
+  const fov = baseFov + cam.fov.x;
+  if (Math.abs(fov - camera.fov) > 1e-4) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  // 입자 크기: 화면 높이(픽셀)와 시야각에 맞춤 — 세로 폰 화면(배율 2)에서 예전과 같은 크기
+  PUFF_SCALE.value = renderer.getDrawingBufferSize(_dbs).y / (2 * Math.tan(camera.fov * D2R / 2)) / 1120;
   if (freeCam) { camera.position.copy(freeCam.p); camera.lookAt(freeCam.t); }
   camera.layers.set(0);
   renderer.clear();
@@ -674,9 +834,9 @@ function scrapPrice(a) {
 
 // 디버그(자동 테스트용)
 function tick(dt, n = 1, draw = true) {
-  for (let i = 0; i < n; i++) { let d = dt; if (hitstop > 0) { hitstop -= d; d *= 0.08; } time += d; step(d); }
+  for (let i = 0; i < n; i++) advance(dt);
   if (draw) render();
 }
-window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, get xray() { return xray; }, set xray(v) { xray = v; }, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; } };
+window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, get xray() { return xray; }, set xray(v) { xray = v; }, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; } };
 
 boot().catch((e) => { console.error(e); const el = $('#err'); if (el) { el.textContent = '불러오기 실패: ' + e.message; el.style.display = 'block'; } });

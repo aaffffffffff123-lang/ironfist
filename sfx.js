@@ -1,8 +1,10 @@
-// 철권 — 효과음 합성 (불러올 때 한 번 만들어 둠) + 태권도 목소리
+// 철권 — 효과음 합성 (불러올 때 한 번 만들어 둠) + 녹음한 맨주먹 타격음 + 태권도 목소리
 import VOICE_B64 from './voice.js';
+import PUNCH from './punch.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const TAU = Math.PI * 2;
+export const WHOOSH_PEAK = 0.09;   // 휘두르는 바람이 가장 커지는 시점(초) — 이 순간이 벽에 닿는 순간과 맞게 재생
 
 // ------------------------------------------------------------------ DSP
 class Synth {
@@ -87,15 +89,84 @@ function design(S) {
   const B = {};
   const put = (name, fn, n = 3) => { B[name] = []; for (let i = 0; i < n; i++) B[name].push(S.fadeOut(S.norm(fn(i)))); };
 
-  // 휘두르는 바람
+  // 휘두르는 바람: 점점 커지고 높아지다 WHOOSH_PEAK(맞는 순간)에 가장 크고 곧바로 끊김
   put('whoosh', () => {
-    const d = 0.16, n = S.noise(Math.floor(d * S.sr));
-    const f0 = rnd(380, 520), f1 = rnd(1300, 1900);
-    let y = S.filt(n, 'bp', (t) => f0 + (f1 - f0) * Math.min(1, t / 0.11), 1.3);
-    return S.mul(y, S.envExp(y.length, 0.05, 0.035));
-  }, 3);
+    const T = WHOOSH_PEAK, d = T + 0.04, n = S.noise(Math.floor(d * S.sr));
+    const f0 = rnd(240, 330), f1 = rnd(1500, 2100);
+    let y = S.filt(n, 'bp', (t) => f0 + (f1 - f0) * Math.pow(Math.min(1, t / T), 1.5), 1.35);
+    y = S.filt(y, 'lp', 6500, 0.7);
+    // 소매 펄럭이는 낮은 바람
+    const lo = S.filt(S.noise(y.length), 'bp', (t) => 140 + 260 * Math.min(1, t / T), 0.9);
+    for (let i = 0; i < y.length; i++) {
+      const t = i / S.sr;
+      const e = t < T ? Math.pow(t / T, 2.3) : Math.exp(-(t - T) / 0.011);
+      y[i] = (y[i] + lo[i] * 0.45) * e;
+    }
+    return y;
+  }, 4);
 
-  // 주먹이 단단한 데 박힐 때 몸통 (벽 공통)
+  // 맨주먹 뼈가 단단한 데 부딪는 '똑' (너클)
+  put('knuckle', () => {
+    const out = S.buf(0.12);
+    const click = S.filt(S.noise(Math.floor(0.003 * S.sr)), 'hp', 2600, 0.7);
+    S.add(out, S.mul(click, S.envExp(click.length, 0.00004, 0.0007)), 0, 1.0);
+    S.add(out, S.modal(0.11, [[rnd(640, 760), 0.9, 0.017], [rnd(1220, 1420), 0.65, 0.010], [rnd(2250, 2600), 0.38, 0.006], [rnd(3700, 4200), 0.22, 0.0035]], 0.0002), 0.0002, 0.85);
+    const body = S.filt(S.noise(Math.floor(0.04 * S.sr)), 'bp', rnd(900, 1200), 1.8);
+    S.add(out, S.mul(body, S.envExp(body.length, 0.0003, 0.008)), 0, 0.5);
+    return S.sat(out, 1.4);
+  }, 6);
+
+  // 벽 재질 — 저음 몸통은 녹음 펀치가 맡고, 여기선 재질 특유의 소리만
+  const knock = (f, q, tau, g = 1) => { const k = S.filt(S.noise(Math.floor((tau * 7 + 0.004) * S.sr)), 'bp', f * rnd(0.88, 1.12), q); return S.gain(S.mul(k, S.envExp(k.length, 0.0003, tau)), g); };
+  const dok = (f0, f1, tau, drive = 2.6) => S.sat(S.sweep(tau * 7, f0 * rnd(0.92, 1.08), f1, tau * 0.6, tau), drive);
+  put('matCement', () => {
+    const o = S.buf(0.2);
+    S.add(o, knock(1450, 1.5, 0.011), 0, 0.9);
+    S.add(o, dok(210, 120, 0.024), 0, 0.55);
+    S.add(o, S.grains(0.07, 46, 2400, 7000, 0.0003, 0.0012, (r) => r * r * 0.06), 0.001, 0.4);
+    return o;
+  }, 5);
+  put('matGravel', () => {
+    const o = S.buf(0.22);
+    S.add(o, knock(1300, 1.4, 0.010), 0, 0.75);
+    S.add(o, dok(200, 115, 0.022), 0, 0.5);
+    S.add(o, S.grains(0.12, 150, 1300, 5600, 0.0004, 0.0018, (r) => r * r * 0.1), 0.0, 0.85);
+    return o;
+  }, 5);
+  put('matWood', () => {
+    const o = S.buf(0.3);
+    S.add(o, knock(900, 1.4, 0.012), 0, 0.7);
+    S.add(o, S.modal(0.28, [[rnd(200, 240), 0.9, 0.05], [rnd(470, 520), 0.65, 0.035], [rnd(880, 980), 0.4, 0.025], [rnd(1650, 1800), 0.22, 0.014]]), 0, 0.85);
+    return o;
+  }, 5);
+  put('matPanel', () => {
+    const o = S.buf(0.45);
+    S.add(o, knock(1000, 1.3, 0.010), 0, 0.7);
+    S.add(o, S.modal(0.42, [[rnd(150, 175), 0.8, 0.08], [rnd(390, 420), 0.55, 0.055], [rnd(760, 820), 0.35, 0.045], [rnd(1330, 1400), 0.18, 0.028]]), 0, 0.8);
+    return o;
+  }, 4);
+  put('matSteel', () => {
+    const o = S.buf(0.8);
+    S.add(o, knock(1500, 1.5, 0.009), 0, 0.65);
+    S.add(o, S.modal(0.78, [[rnd(290, 320), 0.5, 0.22], [rnd(740, 790), 0.4, 0.16], [rnd(1400, 1480), 0.26, 0.11], [rnd(2450, 2600), 0.16, 0.07], [rnd(3800, 3950), 0.09, 0.045]]), 0, 0.75);
+    return o;
+  }, 4);
+  put('matMesh', () => {
+    const o = S.buf(0.5);
+    S.add(o, knock(1700, 1.4, 0.009), 0, 0.6);
+    S.add(o, S.grains(0.26, 70, 1800, 5200, 0.001, 0.004, (r) => r * 0.22, 8), 0, 0.6);
+    S.add(o, S.modal(0.45, [[rnd(520, 560), 0.3, 0.13], [rnd(1220, 1300), 0.25, 0.09], [rnd(2900, 3100), 0.15, 0.06]]), 0, 0.55);
+    return o;
+  }, 4);
+  put('matStone', () => {
+    const o = S.buf(0.2);
+    S.add(o, knock(1250, 1.5, 0.012), 0, 0.85);
+    S.add(o, dok(190, 105, 0.03), 0, 0.6);
+    S.add(o, S.grains(0.08, 60, 2000, 6000, 0.0003, 0.0014, (r) => r * r * 0.07), 0.001, 0.45);
+    return o;
+  }, 4);
+
+  // 주먹이 단단한 데 박힐 때 몸통 (고철·그루터기용 — 녹음 펀치를 안 쓰는 경우)
   const thudCore = (lowF = 120, knockF = 1100, skin = 1) => {
     const d = 0.32, out = S.buf(d);
     S.add(out, S.sat(S.sweep(0.28, lowF * rnd(1.0, 1.25), lowF * 0.38, 0.03, 0.065), 2.2), 0, 1.0);
@@ -105,29 +176,14 @@ function design(S) {
     S.add(out, S.mul(sl, S.envExp(sl.length, 0.0002, 0.006)), 0.0, 0.55 * skin);
     return out;
   };
-  put('thudCement', () => { const o = thudCore(118, 1150); S.add(o, S.grains(0.06, 40, 2500, 6500, 0.0003, 0.0012, (r) => r * 0.05), 0, 0.25); return o; }, 4);
-  put('thudGravel', () => { const o = thudCore(124, 1250); S.add(o, S.grains(0.09, 120, 1200, 5200, 0.0004, 0.002, (r) => r * r * 0.08), 0.0, 0.7); return o; }, 4);
-  put('thudWood', () => {
-    const o = thudCore(110, 700, 0.8);
-    S.add(o, S.modal(0.35, [[rnd(200, 240), 0.9, 0.07], [rnd(470, 520), 0.6, 0.05], [rnd(880, 980), 0.35, 0.035], [rnd(1650, 1800), 0.2, 0.02]]), 0, 0.8);
-    return o;
+  // 무게감 있는 짧은 '쿵' — 저음 배음을 키워 작은 스피커에서도 들리게
+  put('heft', () => {
+    const o = S.buf(0.22);
+    S.add(o, S.sat(S.sweep(0.2, rnd(180, 210), 62, 0.012, 0.05), 3.4), 0, 1.0);
+    const b = S.filt(S.noise(Math.floor(0.08 * S.sr)), 'lp', 900, 0.9);
+    S.add(o, S.mul(b, S.envExp(b.length, 0.0005, 0.018)), 0, 0.45);
+    return S.filt(o, 'lp', 2400, 0.7);
   }, 4);
-  put('thudPanel', () => {
-    const o = thudCore(100, 800, 0.8);
-    S.add(o, S.modal(0.5, [[rnd(150, 175), 0.8, 0.09], [rnd(390, 420), 0.5, 0.06], [rnd(760, 820), 0.3, 0.05], [rnd(1330, 1400), 0.15, 0.03]]), 0, 0.7);
-    return o;
-  }, 3);
-  put('thudSteel', () => {
-    const o = thudCore(110, 1300, 0.8);
-    S.add(o, S.modal(0.9, [[rnd(290, 320), 0.5, 0.25], [rnd(740, 790), 0.35, 0.18], [rnd(1400, 1480), 0.22, 0.12], [rnd(2450, 2600), 0.14, 0.08], [rnd(3800, 3950), 0.08, 0.05]]), 0, 0.6);
-    return o;
-  }, 3);
-  put('thudMesh', () => {
-    const o = thudCore(115, 1500, 0.8);
-    S.add(o, S.grains(0.25, 60, 1800, 5000, 0.001, 0.004, (r) => r * 0.22, 8), 0, 0.5);
-    S.add(o, S.modal(0.6, [[rnd(520, 560), 0.3, 0.15], [rnd(1220, 1300), 0.25, 0.1], [rnd(2900, 3100), 0.15, 0.07]]), 0, 0.5);
-    return o;
-  }, 3);
 
   // 뼈 부러짐(셀러리 꺾는 소리 계열)
   put('crack', () => {
@@ -378,6 +434,17 @@ function ambientBuffers(S) {
   return loops;
 }
 
+// 녹음 펀치 base64(16비트 PCM) → Float32
+function pcm16(b64) {
+  const s = atob(b64), n = s.length >> 1, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let v = s.charCodeAt(i * 2) | (s.charCodeAt(i * 2 + 1) << 8); if (v & 0x8000) v -= 0x10000; out[i] = v / 32768; }
+  return out;
+}
+
+// 벽마다 어떤 재질 소리를 섞는지
+const MAT = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', slime: null, electric: 'matMesh', spikes: null };
+const THUD = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', slime: null, electric: 'matMesh', spikes: null };
+
 // ------------------------------------------------------------------ 재생
 export class SFX {
   constructor() {
@@ -392,6 +459,9 @@ export class SFX {
     this.raw = design(S);
     await new Promise((r) => setTimeout(r, 0));
     this.rawAmb = ambientBuffers(S);
+    try {
+      this.rawPunch = { heavy: PUNCH.heavy.map(pcm16), medium: PUNCH.medium.map(pcm16) };
+    } catch (e) { console.warn('punch', e); this.rawPunch = null; }
   }
   unlock() {
     if (!this.ctx) {
@@ -399,27 +469,35 @@ export class SFX {
       if (!AC) return;
       this.ctx = new AC({ latencyHint: 'interactive' });
       const c = this.ctx;
-      this.master = c.createGain(); this.master.gain.value = this.muted ? 0 : 0.95;
+      // 믹스: 전체 → 부드러운 압축(공격 시간을 둬서 타격 첫머리는 살림) → 리미터(겹쳐도 안 찢어지게)
+      this.master = c.createGain(); this.master.gain.value = this.muted ? 0 : 0.9;
       this.comp = c.createDynamicsCompressor();
-      this.comp.threshold.value = -14; this.comp.knee.value = 8; this.comp.ratio.value = 4; this.comp.attack.value = 0.002; this.comp.release.value = 0.12;
-      this.master.connect(this.comp); this.comp.connect(c.destination);
+      this.comp.threshold.value = -16; this.comp.knee.value = 8; this.comp.ratio.value = 2.6; this.comp.attack.value = 0.012; this.comp.release.value = 0.16;
+      this.lim = c.createDynamicsCompressor();
+      this.lim.threshold.value = -1.5; this.lim.knee.value = 0; this.lim.ratio.value = 20; this.lim.attack.value = 0.001; this.lim.release.value = 0.07;
+      this.master.connect(this.comp); this.comp.connect(this.lim); this.lim.connect(c.destination);
       // 짧은 방 울림
       this.verb = c.createConvolver();
-      const L = Math.floor(c.sampleRate * 0.45), ir = c.createBuffer(2, L, c.sampleRate);
-      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < L; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / L, 3.2) * (i < 80 ? i / 80 : 1); }
-      this.verb.buffer = ir; this.verbGain = c.createGain(); this.verbGain.gain.value = 0.16;
+      const L = Math.floor(c.sampleRate * 0.32), pre = Math.floor(c.sampleRate * 0.006), ir = c.createBuffer(2, L, c.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = pre; i < L; i++) { const k = (i - pre) / (L - pre); d[i] = (Math.random() * 2 - 1) * Math.pow(1 - k, 3.6) * (i < pre + 60 ? (i - pre) / 60 : 1); } }
+      this.verb.buffer = ir; this.verbGain = c.createGain(); this.verbGain.gain.value = 0.13;
       this.verb.connect(this.verbGain); this.verbGain.connect(this.master);
       // 미리 만든 소리를 버퍼로
       const SR = this.SR;
       this.B = {};
       for (const [k, list] of Object.entries(this.raw)) this.B[k] = list.map((a) => { const b = c.createBuffer(1, a.length, SR); b.copyToChannel(a, 0); return b; });
+      if (this.rawPunch) {
+        const mk = (a) => { const b = c.createBuffer(1, a.length, PUNCH.sr); b.copyToChannel(a, 0); return b; };
+        this.B.punchH = this.rawPunch.heavy.map(mk);
+        this.B.punchM = this.rawPunch.medium.map(mk);
+      }
       this.amb = {};
       for (const [k, a] of Object.entries(this.rawAmb)) { const b = c.createBuffer(1, a.length, SR); b.copyToChannel(a, 0); this.amb[k] = b; }
       this.ready = true;
       this.loadVoice();
       if (this.pendingAmb) this.ambience(this.pendingAmb);
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state === 'suspended' && this.ctx.resume) { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); }
   }
   async loadVoice() {
     try {
@@ -428,17 +506,28 @@ export class SFX {
       this.voiceBuf = await this.ctx.decodeAudioData(u.buffer);
     } catch (e) { console.warn('voice', e); }
   }
-  setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.95; }
+  setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.9; }
+  // opts: rate, jitter, delay, verb(false면 울림 없음), verbAmt, pan(-1 왼쪽 ~ 1 오른쪽)
   play(name, vol = 1, opts = {}) {
-    if (!this.ready || !this.B[name]) return;
+    if (!this.ready || !this.B[name] || !this.B[name].length) return;
     const c = this.ctx, list = this.B[name];
     const src = c.createBufferSource();
     src.buffer = list[Math.floor(Math.random() * list.length)];
     src.playbackRate.value = (opts.rate || 1) * (1 + (Math.random() - 0.5) * (opts.jitter ?? 0.12));
     const g = c.createGain(); g.gain.value = vol;
-    src.connect(g); g.connect(this.master);
+    src.connect(g);
+    let out = g;
+    if (opts.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, opts.pan)); g.connect(p); out = p; }
+    out.connect(this.master);
     if (opts.verb !== false) { const s = c.createGain(); s.gain.value = opts.verbAmt ?? 1; g.connect(s); s.connect(this.verb); }
     src.start(c.currentTime + (opts.delay || 0));
+  }
+  // 휘두르는 바람 — 주먹이 벽에 닿는 순간(dur 초 뒤)에 가장 커지게
+  whoosh(side, dur, vol = 0.3) {
+    const T = WHOOSH_PEAK;
+    let rate = 1, delay = 0;
+    if (dur >= T) delay = dur - T; else rate = T / dur;
+    this.play('whoosh', vol, { rate, delay, jitter: 0.05, pan: side === 'L' ? -0.38 : 0.38, verbAmt: 0.25 });
   }
   voice(id) {
     if (!this.ready || !this.voiceBuf) return;
@@ -458,22 +547,32 @@ export class SFX {
     src.connect(g); g.connect(this.master); src.start();
     this.ambSrc = src; this.ambGain = g;
   }
-  // 타격 묶음
-  impact(wallId, res, power, arm) {
-    const v = Math.min(1, 0.55 + power * 0.3);
+  // 타격 묶음 — side: 친 팔('L'|'R'), feel: 타격 세기(연출용, 0.6~1.9)
+  impact(wallId, res, power, arm, side = 'L', feel = 1) {
+    const v = Math.min(1, 0.62 + power * 0.28);
+    const k = Math.min(1.25, 0.85 + (feel - 0.8) * 0.4);
+    const pan = side === 'L' ? -0.2 : 0.2;
     const scrap = res.scrap > 0;
-    const thud = { cement: 'thudCement', gravel: 'thudGravel', traps: 'thudWood', glass: 'thudCement', nails: 'thudWood', freezer: 'thudPanel', hotplate: 'thudSteel', slime: null, electric: 'thudMesh', spikes: null }[wallId];
+    const mat = MAT[wallId], thud = THUD[wallId];
     if (scrap) {
-      this.play('clank', 0.9 * v); if (Math.random() < 0.5) this.play('ping', 0.4, { delay: rnd(0.04, 0.12) });
-      if (thud) this.play(thud, 0.45);
+      // 쇳덩이가 벽을 때림: 쨍 + 묵직한 쿵
+      this.play('clank', Math.max(0.85, v), { pan }); if (Math.random() < 0.5) this.play('ping', 0.4, { delay: rnd(0.04, 0.12), pan: pan * 2 });
+      this.play('heft', 0.75 * k, { pan, verbAmt: 0.6 });
+      if (thud) this.play(thud, 0.5, { pan });
     } else if (arm.I >= 0.5) {
-      this.play('stump', 0.9 * v);
-      if (thud) this.play(thud, 0.4);
+      // 손 없는 팔뚝 끝이 짓이겨짐
+      this.play('stump', 1.0, { pan });
+      this.play('punchH', 0.7 * k, { pan, jitter: 0.1, rate: 0.88 });
+      if (thud) this.play(thud, 0.5, { pan });
     } else {
-      if (thud) this.play(thud, 0.95 * v);
+      // 살 주먹: 녹음 펀치(몸통) + 너클 뼈 '똑' + 벽 재질
+      const heavy = feel > 1.05 || Math.random() < 0.55;
+      this.play(heavy ? 'punchH' : 'punchM', 0.95 * k, { pan, jitter: 0.09, verbAmt: 0.7 });
+      this.play('knuckle', 0.42 * v, { pan, jitter: 0.1, verbAmt: 0.4 });
+      if (mat) this.play(mat, 0.6 * v, { pan, jitter: 0.08 });
       const I = arm.I;
-      if (I > 0.06) this.play('squelch', Math.min(1, 0.25 + I * 2.0) * v, { delay: 0.005 });
-      if (I > 0.28) this.play('crunch', Math.min(1, (I - 0.2) * 2.2) * v, { delay: 0.008 });
+      if (I > 0.06) this.play('squelch', Math.min(1, 0.25 + I * 2.0) * v, { delay: 0.005, pan });
+      if (I > 0.28) this.play('crunch', Math.min(1, (I - 0.2) * 2.2) * v, { delay: 0.008, pan });
     }
     switch (wallId) {
       case 'gravel': if (!scrap) this.play('crunch', 0.3); break;
