@@ -316,10 +316,111 @@ class Arcs {
   }
 }
 
+// ------------------------------------------------------------------ 모아치기 전용 충격
+// 기존 Puffs는 먼지·김처럼 부드러운 잔효과에 적합하지만, 주 이펙트로 키우면
+// 둥근 점 스프라이트가 그대로 드러난다. 압력파와 불꽃은 방향과 깊이가 읽히는
+// 별도 3D 지오메트리로 만든다.
+function powerRingMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: true,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: {
+      uAlpha: { value: 0 }, uAge: { value: 0 }, uSeed: { value: Math.random() * 100 },
+      uColor: { value: new THREE.Color().setRGB(1.15, 0.92, 0.68) },
+    },
+    vertexShader: `varying float vR; varying float vN;
+      uniform float uAge; uniform float uSeed;
+      void main(){
+        vec3 p = position;
+        float a = atan(p.y, p.x);
+        float n = sin(a * 7.0 + uSeed) * 0.020 + sin(a * 13.0 - uSeed * 1.7) * 0.010 + sin(a * 19.0 + uSeed * 0.4) * 0.006;
+        p.xy *= 1.0 + n * (1.0 - uAge * 0.45);
+        vR = clamp((length(position.xy) - 0.82) / 0.18, 0.0, 1.0);
+        vN = 0.72 + 0.28 * sin(a * 11.0 + uSeed * 2.1);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `varying float vR; varying float vN;
+      uniform float uAlpha; uniform vec3 uColor;
+      void main(){
+        float band = smoothstep(0.0, 0.26, vR) * (1.0 - smoothstep(0.62, 1.0, vR));
+        float a = uAlpha * band * vN;
+        if(a < 0.004) discard;
+        gl_FragColor = vec4(uColor, a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
+class PowerStreaks {
+  constructor(max = 56) {
+    this.max = max; this.stride = 12; this.p = [];
+    const g = new THREE.BufferGeometry();
+    this.pos = new Float32Array(max * this.stride * 3);
+    this.col = new Float32Array(max * this.stride * 3);
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
+    g.setDrawRange(0, 0);
+    this.obj = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, depthTest: true, side: THREE.DoubleSide,
+    }));
+    this.obj.frustumCulled = false; this.obj.renderOrder = 8;
+  }
+  burst(c, n, strength, scrap, side) {
+    const sg = side === 'L' ? -1 : 1;
+    for (let i = 0; i < n; i++) {
+      if (this.p.length >= this.max) this.p.shift();
+      // 벽면을 긁으며 바깥으로 찢어지되, 일부만 카메라 쪽으로 튀어 깊이를 만든다.
+      const a = (i / Math.max(1, n)) * Math.PI * 2 + rnd(-0.34, 0.34);
+      const sp = rnd(1.15, 2.65) * (0.48 + strength * 0.66) * (scrap ? 1 : 0.78);
+      this.p.push({
+        p: c.clone().add(new THREE.Vector3(rnd(-0.004, 0.004), rnd(-0.004, 0.004), rnd(0.002, 0.010))),
+        v: new THREE.Vector3(Math.cos(a) * sp + sg * rnd(0.0, 0.24), Math.sin(a) * sp * 0.78 + rnd(0.12, 0.52), rnd(0.18, 0.95)),
+        t: 0, life: rnd(0.085, 0.150), len: rnd(0.030, 0.068) * (0.48 + strength * 0.66),
+        width: rnd(0.00065, 0.00125) * (scrap ? 1 : 0.72) * (0.55 + strength * 0.45), scrap,
+      });
+    }
+  }
+  update(dt) {
+    for (const q of this.p) {
+      q.t += dt; q.v.y -= 3.8 * dt; q.v.multiplyScalar(Math.pow(0.20, dt)); q.p.addScaledVector(q.v, dt);
+    }
+    this.p = this.p.filter((q) => q.t < q.life);
+    let at = 0;
+    const put = (p, r, g, b) => {
+      this.pos[at * 3] = p.x; this.pos[at * 3 + 1] = p.y; this.pos[at * 3 + 2] = p.z;
+      this.col[at * 3] = r; this.col[at * 3 + 1] = g; this.col[at * 3 + 2] = b; at++;
+    };
+    const ribbon = (tip, dir, perp, len, width, color) => {
+      const mid = tip.clone().addScaledVector(dir, -len * 0.44);
+      const tail = tip.clone().addScaledVector(dir, -len);
+      const p1 = mid.clone().addScaledVector(perp, width), p2 = mid.clone().addScaledVector(perp, -width);
+      put(tip, ...color); put(p1, ...color); put(tail, ...color);
+      put(tip, ...color); put(tail, ...color); put(p2, ...color);
+    };
+    for (const q of this.p) {
+      const fade = Math.pow(Math.max(0, 1 - q.t / q.life), 1.45);
+      const dir = q.v.clone().normalize();
+      const perp = new THREE.Vector3(-dir.y, dir.x, 0);
+      if (perp.lengthSq() < 1e-5) perp.set(1, 0, 0); else perp.normalize();
+      // 철권은 탁한 주황 금속불꽃, 맨손은 채도를 뺀 아이보리 압력광으로 구분한다.
+      const outer = q.scrap ? [1.12, 0.34, 0.07] : [0.82, 0.72, 0.58];
+      const core = q.scrap ? [2.15, 1.32, 0.52] : [1.70, 1.52, 1.26];
+      ribbon(q.p, dir, perp, q.len, q.width * 1.8, outer.map((v) => v * fade));
+      ribbon(q.p, dir, perp, q.len * 0.72, q.width * 0.48, core.map((v) => v * fade));
+    }
+    this.obj.geometry.setDrawRange(0, at);
+    this.obj.geometry.attributes.position.needsUpdate = true;
+    this.obj.geometry.attributes.color.needsUpdate = true;
+  }
+  clear() { this.p.length = 0; this.obj.geometry.setDrawRange(0, 0); }
+}
+
 // ------------------------------------------------------------------ FX
 export class FX {
-  constructor(scene, renderer, G) {
-    this.scene = scene; this.G = G;
+  constructor(scene, renderer, G, lightPool = []) {
+    this.scene = scene; this.G = G; this.lightPool = lightPool;
     this.blood = new BloodMap();
     // 핏방울
     this.dropMax = 600;
@@ -351,6 +452,29 @@ export class FX {
     this.dust = new Puffs(160, { color: 0xe4ded3, size: 0.014, opacity: 0.4 }); scene.add(this.dust.obj);
     this.grit = new Puffs(200, { color: 0x77716a, size: 0.003, opacity: 0.95 }); scene.add(this.grit.obj);
     this.dust.obj.renderOrder = 5; this.grit.obj.renderOrder = 5;
+    // 모아치기: 장면 안에서 실제 깊이와 방향이 읽히는 짧은 전용 효과들.
+    // 풀을 처음부터 장면에 올려 광원 개수가 플레이 중 바뀌지 않게 한다.
+    this.powerRingGeo = new THREE.RingGeometry(0.82, 1, 96, 1);
+    this.powerRings = Array.from({ length: 4 }, () => {
+      const mat = powerRingMaterial();
+      const mesh = new THREE.Mesh(this.powerRingGeo, mat);
+      mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 7;
+      scene.add(mesh);
+      return { mesh, mat, active: false, t: 0, life: 0.12, r0: 0.025, r1: 0.24, strength: 1 };
+    });
+    this.powerStreaks = new PowerStreaks(56); scene.add(this.powerStreaks.obj);
+    this.powerArcs = new Arcs(); this.powerArcs.obj.renderOrder = 9; scene.add(this.powerArcs.obj);
+    const flashGeo = new THREE.IcosahedronGeometry(1, 1);
+    this.powerFlashes = Array.from({ length: 2 }, () => {
+      const mat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setRGB(1.65, 1.22, 0.72), transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: true,
+      });
+      const mesh = new THREE.Mesh(flashGeo, mat);
+      mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 10;
+      scene.add(mesh);
+      return { mesh, mat, light: null, active: false, t: 0, life: 0.032, strength: 1 };
+    });
     this.ambient = [];
     this.wall = null;
     this.armRefs = null;
@@ -364,6 +488,7 @@ export class FX {
     // 이전 벽의 피·살점 저장 → 새 벽 불러오기
     if (this.wall) this.saveWall(this.wall.def.id);
     this.wall = wall;
+    this.clearPowerImpact();
     const dc = DUST[wall.def.id];
     if (dc) { this.dust.mat.uniforms.uColor.value.set(dc.dust); this.grit.mat.uniforms.uColor.value.set(dc.grit); }
     this.stuckScrap = [];
@@ -441,6 +566,92 @@ export class FX {
         vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 + rnd(0.1, 0.6), vz: rnd(0.15, 0.9),
         drag: 0.35, g: -7.5, life: rnd(0.3, 0.6), size: rnd(0.0018, 0.0036) * d.gs, grow: 1, a: 0.95, pop: 1 });
     }
+  }
+
+  // 모아치기 접촉 전용. 벽 자체에는 아무 흔적도 남기지 않고, 공기·빛·금속 불꽃만 잠깐 터진다.
+  powerImpact(c, { strength = 1, scrap = false, side = 'L', full = false } = {}) {
+    if (!c) return;
+    const k = clamp(Number.isFinite(strength) ? strength : 0, 0, 1);
+    if (k < 0.04) return;
+    const wallZ = this.wall ? this.wall.surfaceZ() : c.z;
+    const p = new THREE.Vector3(c.x, c.y, Math.max(c.z, wallZ) + 0.008);
+
+    const ring = this.powerRings.find((r) => !r.active) || this.powerRings.reduce((a, b) => a.t / a.life > b.t / b.life ? a : b);
+    ring.active = true; ring.t = 0; ring.life = 0.085 + k * 0.045;
+    ring.r0 = 0.016 + k * 0.017; ring.r1 = 0.09 + k * 0.165; ring.strength = k;
+    ring.mesh.visible = true; ring.mesh.position.copy(p); ring.mesh.scale.setScalar(ring.r0);
+    ring.mat.uniforms.uAge.value = 0; ring.mat.uniforms.uSeed.value = Math.random() * 100;
+    ring.mat.uniforms.uAlpha.value = 0.28 + k * 0.72;
+    if (scrap) ring.mat.uniforms.uColor.value.setRGB(1.45, 0.86, 0.34);
+    else ring.mat.uniforms.uColor.value.setRGB(1.05, 0.92, 0.76);
+
+    const flash = this.powerFlashes.find((f) => !f.active) || this.powerFlashes.reduce((a, b) => a.t / a.life > b.t / b.life ? a : b);
+    // 저프레임에서도 적어도 한 장은 읽히되, 화면 전체를 덮는 플래시는 되지 않게 국소 수명만 늘린다.
+    this.releasePowerLight(flash);
+    flash.active = true; flash.t = 0; flash.life = 0.070 + k * 0.025; flash.strength = k;
+    flash.mesh.visible = true; flash.mesh.position.copy(p).add(new THREE.Vector3(0, 0, 0.012));
+    flash.mesh.scale.setScalar(0.005 + k * 0.012); flash.mat.opacity = 0.32 + k * 0.50;
+    flash.mat.color.setRGB(scrap ? 1.75 : 1.48, scrap ? 1.18 : 1.32, scrap ? 0.62 : 1.02);
+    flash.light = this.lightPool.find((l) => !l.userData.busy && !l.userData.powerBusy) || null;
+    if (flash.light) {
+      flash.light.userData.powerBusy = true;
+      flash.light.position.copy(p).add(new THREE.Vector3(0, 0, 0.035));
+      flash.light.color.set(scrap ? 0xffc47d : 0xffe5c4);
+      flash.light.distance = 0.7; flash.light.decay = 2;
+      flash.light.intensity = 1.4 + k * 7.6;
+    }
+
+    const n = Math.round((scrap ? 4 : 2) + (scrap ? 16 : 5) * k);
+    this.powerStreaks.burst(p, n, k, scrap, side);
+
+    if (full) {
+      const arcs = 2 + (Math.random() < 0.45 ? 1 : 0);
+      for (let i = 0; i < arcs; i++) {
+        const a = (i / arcs) * Math.PI * 2 + rnd(-0.55, 0.55), r = rnd(0.035, 0.075);
+        const start = p.clone().add(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r * 0.75, rnd(-0.001, 0.006)));
+        const end = p.clone().add(new THREE.Vector3(rnd(-0.018, 0.018), rnd(-0.014, 0.022), rnd(0.032, 0.065)));
+        this.powerArcs.add(start, end, rnd(0.080, 0.115), rnd(0.0007, 0.00115));
+      }
+    }
+  }
+
+  releasePowerLight(flash) {
+    if (!flash.light) return;
+    flash.light.intensity = 0;
+    flash.light.userData.powerBusy = false;
+    flash.light = null;
+  }
+
+  clearPowerImpact() {
+    for (const r of this.powerRings) { r.active = false; r.mesh.visible = false; r.mat.uniforms.uAlpha.value = 0; }
+    for (const f of this.powerFlashes) { f.active = false; f.mesh.visible = false; f.mat.opacity = 0; this.releasePowerLight(f); }
+    this.powerStreaks.clear();
+    this.powerArcs.arcs.length = 0; this.powerArcs.update(0);
+  }
+
+  updatePowerImpact(dt) {
+    for (const r of this.powerRings) {
+      if (!r.active) continue;
+      r.t += dt;
+      if (r.t >= r.life) { r.active = false; r.mesh.visible = false; r.mat.uniforms.uAlpha.value = 0; continue; }
+      const u = r.t / r.life, e = 1 - Math.pow(1 - u, 3);
+      r.mesh.scale.setScalar(r.r0 + (r.r1 - r.r0) * e);
+      r.mat.uniforms.uAge.value = u;
+      const appear = Math.min(1, u / 0.1);
+      r.mat.uniforms.uAlpha.value = appear * Math.pow(1 - u, 1.55) * (0.28 + r.strength * 0.72);
+    }
+    for (const f of this.powerFlashes) {
+      if (!f.active) continue;
+      f.t += dt;
+      if (f.t >= f.life) { f.active = false; f.mesh.visible = false; f.mat.opacity = 0; this.releasePowerLight(f); continue; }
+      const u = f.t / f.life, fade = Math.pow(1 - u, 1.6);
+      f.mat.opacity = (0.32 + f.strength * 0.50) * fade;
+      f.mesh.scale.multiplyScalar(1 + dt * 9);
+      if (f.light) f.light.intensity = (1.4 + f.strength * 7.6) * fade;
+    }
+    // 마지막 입자가 죽는 프레임에는 한 번 비우고, 그 뒤 유휴 프레임에는 GPU 버퍼를 건드리지 않는다.
+    if (this.powerStreaks.p.length) this.powerStreaks.update(dt);
+    if (this.powerArcs.arcs.length) this.powerArcs.update(dt);
   }
 
   spawnDrop(x, y, z, vx, vy, vz, r) {
@@ -631,5 +842,6 @@ export class FX {
     this.blood.update(dt, time);
     this.smoke.update(dt); this.steam.update(dt); this.sparkP.update(dt); this.sparkB.update(dt); this.bubbleP.update(dt); this.frost.update(dt);
     this.dust.update(rdt); this.grit.update(rdt);
+    this.updatePowerImpact(rdt);
   }
 }

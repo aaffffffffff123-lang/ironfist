@@ -184,6 +184,47 @@ function design(S) {
     return S.filt(o, 'lp', 2400, 0.7);
   }, 4);
 
+  // 모아치기 — 일반 타격 위에 얹는 전용 층. 첫머리는 짧고 단단하게,
+  // 방 전체 울림은 조금 늦게 와서 접촉과 여진이 한 덩어리로 뭉개지지 않게 한다.
+  put('powerCore', () => {
+    const o = S.buf(0.42);
+    // 작은 스피커에서도 질량이 들리도록 55Hz 바닥 위에 120~230Hz 배음을 둔다.
+    S.add(o, S.sat(S.sweep(0.32, rnd(230, 270), rnd(48, 57), 0.012, 0.075), 2.7), 0, 0.86);
+    S.add(o, S.sweep(0.22, rnd(135, 165), rnd(62, 72), 0.018, 0.052), 0.001, 0.54);
+    const chest = S.filt(S.noise(Math.floor(0.11 * S.sr)), 'bp', rnd(185, 235), 0.75);
+    S.add(o, S.mul(chest, S.envExp(chest.length, 0.00035, 0.022)), 0, 0.43);
+    // 접촉점의 아주 짧은 압력음. 고역을 길게 남기지 않아 일반 펀치·골절음을 가리지 않는다.
+    const snap = S.filt(S.noise(Math.floor(0.018 * S.sr)), 'bp', rnd(1100, 1550), 1.05);
+    S.add(o, S.mul(snap, S.envExp(snap.length, 0.00008, 0.0038)), 0, 0.28);
+    return S.filt(S.sat(o, 1.45), 'lp', 3200, 0.7);
+  }, 4);
+  put('powerRoom', () => {
+    const o = S.buf(0.68);
+    // 직후의 두 번째 '쿵'. 재생 쪽에서 40ms가량 늦춰 방의 부피로 들리게 한다.
+    S.add(o, S.sat(S.sweep(0.58, rnd(128, 148), rnd(38, 45), 0.045, 0.17, 0.002), 2.1), 0, 0.82);
+    S.add(o, S.modal(0.62, [
+      [rnd(72, 82), 0.55, rnd(0.16, 0.22)],
+      [rnd(138, 158), 0.34, rnd(0.12, 0.18)],
+      [rnd(245, 285), 0.18, rnd(0.08, 0.13)],
+    ], 0.003), 0, 0.62);
+    const room = S.filt(S.filt(S.noise(o.length), 'lp', 620, 0.7), 'hp', 42, 0.7);
+    S.add(o, S.mul(room, S.envExp(room.length, 0.004, 0.13)), 0, 0.19);
+    return S.filt(S.sat(o, 1.25), 'lp', 1500, 0.7);
+  }, 3);
+  put('powerMetal', () => {
+    const o = S.buf(0.46);
+    // 철권은 밝은 한 번의 파열음 뒤에 낮은 금속 공명만 남긴다.
+    const bite = S.filt(S.noise(Math.floor(0.025 * S.sr)), 'bp', rnd(1750, 2350), 2.3);
+    S.add(o, S.mul(bite, S.envExp(bite.length, 0.0001, 0.005)), 0, 0.42);
+    const f = rnd(430, 560);
+    S.add(o, S.modal(0.44, [
+      [f, 0.52, rnd(0.10, 0.15)],
+      [f * rnd(2.28, 2.55), 0.28, rnd(0.055, 0.09)],
+      [f * rnd(4.1, 4.7), 0.12, rnd(0.025, 0.05)],
+    ], 0.0003), 0, 0.58);
+    return S.filt(S.sat(o, 1.25), 'hp', 170, 0.7);
+  }, 4);
+
   // 뼈 부러짐(셀러리 꺾는 소리 계열)
   put('crack', () => {
     const d = 0.32, out = S.buf(d);
@@ -460,6 +501,7 @@ export class SFX {
   constructor() {
     this.ctx = null; this.B = null; this.muted = false;
     this.ready = false; this.pendingAmb = null;
+    this._lastPowerAt = -10;
     this.SR = 44100;
   }
   // 불러오는 동안 미리 합성(첫 타격 때 멈칫하지 않게)
@@ -540,6 +582,33 @@ export class SFX {
     src.connect(g); g.connect(this.master); src.start();
     this.ambSrc = src; this.ambGain = g;
   }
+  // 모아치기 전용 추가 층. 기존 impact()의 벽·살 소리는 그대로 두고,
+  // 접촉의 질량과 늦게 밀려오는 방 울림만 더한다.
+  powerImpact(side = 'L', scrap = false, strength = 1) {
+    if (!this.ready || !this.ctx) return;
+    const q = Math.max(0, Math.min(1, Number.isFinite(strength) ? strength : 1));
+    const now = this.ctx.currentTime;
+    // 두 손을 거의 동시에 놓았을 때 두 번째 저역을 살짝 눌러 리미터가 숨 막히게 작동하지 않게 한다.
+    const stacked = now - this._lastPowerAt < 0.085;
+    this._lastPowerAt = now;
+    const stackK = stacked ? 0.62 : 1;
+    // 약충전은 기존 타격음 위에 질량만 살짝 얹고, 완충에서만 방 전체가 울리게 연속적으로 키운다.
+    const k = (0.16 + Math.pow(q, 0.68) * 0.84) * stackK;
+    const pan = side === 'L' ? -0.16 : 0.16;
+
+    this.play('powerCore', 0.78 * k, {
+      pan, rate: scrap ? 0.92 : 0.98, jitter: 0.035, verbAmt: 0.18,
+    });
+    // 시각 압력파와 맞물리는 42ms 뒤의 두 번째 폭음. 저역은 중앙에 가깝게 둔다.
+    this.play('powerRoom', 0.66 * k, {
+      delay: 0.042, pan: pan * 0.25, rate: 0.96, jitter: 0.025, verbAmt: 0.42,
+    });
+    if (scrap) {
+      this.play('powerMetal', 0.44 * k, {
+        delay: 0.007, pan: pan * 1.65, rate: 0.94, jitter: 0.045, verbAmt: 0.38,
+      });
+    }
+  }
   // 타격 묶음 — side: 친 팔('L'|'R'), feel: 타격 세기(연출용, 0.6~1.9)
   impact(wallId, res, power, arm, side = 'L', feel = 1) {
     const v = Math.min(1, 0.62 + power * 0.28);
@@ -548,8 +617,8 @@ export class SFX {
     const scrap = res.scrap > 0;
     const mat = MAT[wallId], thud = THUD[wallId];
     // 벽은 멀쩡하고 손만 망가지는 대신, 모든 접촉에 짧고 낮은 '쿵'을 또렷하게 남긴다.
-    const boom = scrap ? 1.05 : arm.I >= 0.5 ? 0.92 : 0.88;
-    this.play('heft', boom * k, { pan, rate: scrap ? 0.9 : 0.94, jitter: 0.04, verbAmt: 0.72 });
+    const boom = scrap ? 1.12 : arm.I >= 0.5 ? 1.0 : 0.96;
+    this.play('heft', boom * k, { pan, rate: scrap ? 0.9 : 0.94, jitter: 0.04, verbAmt: 0.76 });
     if (scrap) {
       // 쇳덩이가 벽을 때림: 쨍 + 묵직한 쿵
       this.play('clank', Math.max(0.85, v), { pan }); if (Math.random() < 0.5) this.play('ping', 0.4, { delay: rnd(0.04, 0.12), pan: pan * 2 });

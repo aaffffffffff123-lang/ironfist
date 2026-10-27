@@ -33,7 +33,7 @@ export class UI {
       else { this.deny(); this.renderShop(); }
     });
     this.syncSound();
-    $('#ctrlHint').textContent = touch ? '화면 왼쪽을 누르면 왼주먹, 오른쪽을 누르면 오른주먹' : 'F · J 키, 또는 마우스 왼쪽 · 오른쪽 클릭';
+    $('#ctrlHint').textContent = touch ? '화면 좌·우: 짧게 타격 · 길게 눌렀다 떼면 모아치기' : 'F · J / 마우스 좌·우: 짧게 타격 · 길게 눌렀다 떼면 모아치기';
   }
   syncSound() { this.el.sound.classList.toggle('off', this.A.isMuted()); }
   ready() {
@@ -75,7 +75,7 @@ export class UI {
   }
   hint(id) {
     const txt = {
-      controls: touch ? '화면 왼쪽·오른쪽을 눌러 주먹을 내지르세요' : 'F · J 키나 마우스 왼쪽·오른쪽 클릭으로 주먹을 내지르세요',
+      controls: touch ? '짧게 누르면 타격 · 길게 눌렀다 떼면 모아치기' : 'F · J를 짧게 누르면 타격 · 길게 눌렀다 떼면 모아치기',
       stuck: '손이 박혔습니다. 같은 쪽을 연달아 눌러 빼세요',
       pinned: '팔이 꿰였습니다. 같은 쪽을 눌러 버둥거리면 빨리 빠집니다',
     }[id];

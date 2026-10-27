@@ -17,11 +17,17 @@ const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시�
 const BACK_T = 0.2;                  // 벽에서 튕겨 가드로 돌아오는 시간
 const HOLD_T = 0.012;                // 멈춤이 풀린 뒤 벽에 붙어 있는 시간
 const HS_SLOW = 0.03;                // 멈춤(히트스톱) 동안 시간 흐름 배율
+const CHARGE_START = 0.22;            // 이보다 짧게 누르면 기존 일반타
+const CHARGE_FULL = 0.68;             // 완충까지 걸리는 실제 시간(초)
+const CHARGE_FLESH = 0.162;           // 최소 피해로도 완충 3회면 멀쩡한 주먹이 사라지는 고정 자해량
+const CHARGE_SCRAP = 48;              // 고철 덩어리(HP 140)가 완충 약 3회에 파괴
+const CHARGE_JOINT = 0.035;           // 철권 연결부 살에 되돌아오는 완충 충격
 const D2R = Math.PI / 180;
 const $ = (s) => document.querySelector(s);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const smooth = (u) => u * u * (3 - 2 * u);
+const realSeconds = () => performance.now() * 0.001;
 
 // ------------------------------------------------------------------ 렌더러
 const canvas = $('#c');
@@ -164,13 +170,26 @@ const CAM_SPRINGS = [cam.pitch, cam.yaw, cam.roll, cam.push, cam.fov];
 // 주먹이 벽에 꽂힌 순간: 고개가 앞으로 꾸벅, 친 쪽으로 몸이 돌고 기울며, 화면이 확 당겨짐
 function camKick(side, feel, evW) {
   const sg = side === 'L' ? 1 : -1;
-  const k = Math.min(1.6, feel), r = 1 / (1 + 0.28 * rush);
-  cam.trauma = Math.min(1, cam.trauma + (0.32 + 0.2 * (k - 0.8)) * r + evW * 0.4);
-  cam.pitch.kick(-(0.6 + 0.35 * (k - 0.8) + evW * 0.5) * r * D2R);
-  cam.yaw.kick(sg * (0.35 + 0.15 * (k - 0.8)) * r * D2R);
-  cam.roll.kick(-sg * (0.75 + 0.35 * (k - 0.8) + evW * 0.5) * r * D2R);
-  cam.push.kick(-(0.005 + 0.002 * (k - 0.8)) * r);
-  cam.fov.kick(-(2.0 + 0.8 * (k - 0.8)) * r - evW * 1.5);
+  // 빠르게 연타해도 각 접촉의 질량이 사라지지 않게 최소 반동을 남긴다.
+  const k = Math.min(1.6, feel), r = Math.max(0.62, 1 / (1 + 0.28 * rush));
+  cam.trauma = Math.min(1, cam.trauma + (0.38 + 0.22 * (k - 0.8)) * r + evW * 0.4);
+  cam.pitch.kick(-(0.72 + 0.38 * (k - 0.8) + evW * 0.5) * r * D2R);
+  cam.yaw.kick(sg * (0.40 + 0.17 * (k - 0.8)) * r * D2R);
+  cam.roll.kick(-sg * (0.90 + 0.40 * (k - 0.8) + evW * 0.5) * r * D2R);
+  cam.push.kick(-(0.0065 + 0.0025 * (k - 0.8)) * r);
+  cam.fov.kick(-(2.35 + 0.9 * (k - 0.8)) * r - evW * 1.5);
+}
+// 모아치기 반동은 연타 보정으로 줄이지 않는다. 벽은 그대로고 몸과 카메라만 밀려난다.
+function camPowerKick(side, amount) {
+  const k = smooth(clamp(amount, 0, 1));
+  if (k <= 0) return;
+  const sg = side === 'L' ? 1 : -1;
+  cam.trauma = Math.min(1, cam.trauma + 0.92 * k);
+  cam.pitch.kick(-(2.05 * k) * D2R);
+  cam.yaw.kick(sg * (0.90 * k) * D2R);
+  cam.roll.kick(-sg * (1.75 * k) * D2R);
+  cam.push.kick(-(0.016 * k));
+  cam.fov.kick(-(5.0 * k));
 }
 // 박힌 손을 뜯어낼 때 몸이 뒤로 젖혀짐
 function camPull(side) {
@@ -203,6 +222,8 @@ class Fist {
     this.flinchUntil = 0;
     this.tug = 0; this.tremble = 0;
     this.lastPress = -9;
+    // 누르고 있는 동안은 발사하지 않는다. 가드로 완전히 돌아온 뒤부터 실제 충전 시간을 센다.
+    this.inputHeld = false; this.chargeStart = -1; this.punchCharge = 0;
     // 맞은 순간의 느낌 — 실제 시간으로 흐름(히트스톱 동안에도 떨림·눌림이 보이게)
     this.impT = 9; this.impA = 0; this.impDir = new THREE.Vector3(1, 0, 0); this.jit = new THREE.Vector3(); this._jf = false;
     this.comp = 0; this.compT = 0; this.push = 0.009; this.squashK = 1;
@@ -223,15 +244,49 @@ class Fist {
       this.startPunch(now);
     } else this.queue = Math.min(1, this.queue + 1);
   }
-  startPunch(now) {
+  beginHold(now, realNow) {
+    const st = this.state;
+    if (mode !== 'play' || !round || round.ended || this.inputHeld) return false;
+    if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return false; }
+    // 박히거나 꿰인 팔은 길게 누르기보다 기존처럼 누르는 즉시 한 번 버둥거린다.
+    if (st === 'stuck' || st === 'pinned') { onTug(this, now); return false; }
+    this.inputHeld = true;
+    this.chargeStart = -1;
+    this.queue = 0;
+    if (st === 'idle' && now >= this.flinchUntil) this.chargeStart = realNow;
+    return true;
+  }
+  endHold(now, realNow, cancel = false) {
+    if (!this.inputHeld) return;
+    const started = this.chargeStart;
+    this.inputHeld = false;
+    this.chargeStart = -1;
+    if (cancel || mode !== 'play' || !round || round.ended) return;
+    if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
+    // 가드에서 충전 중이었다면 손을 뗀 순간 발사. 짧은 터치는 기존 일반타와 같다.
+    if (started >= 0 && this.state === 'idle' && now >= this.flinchUntil) {
+      const held = Math.max(0, realNow - started);
+      const charge = held <= CHARGE_START ? 0 : clamp((held - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1);
+      this.startPunch(now, smooth(charge));
+      return;
+    }
+    // 회수 중에 눌렀다가 가드로 돌아오기 전에 뗐으면 기존처럼 일반타 한 번만 예약한다.
+    this.press(now);
+  }
+  cancelHold() {
+    this.inputHeld = false;
+    this.chargeStart = -1;
+  }
+  startPunch(now, charge = 0) {
     this.state = 'out';
     this.s0 = this.s; this.u = 0;
-    this.wind = !this.autoPunch && this.s < 0.15 ? 1 : 0;
+    this.punchCharge = this.autoPunch ? 0 : clamp(charge, 0, 1);
+    this.wind = !this.autoPunch && this.punchCharge <= 0 && this.s < 0.15 ? 1 : 0;
     // 덜 돌아온 데서 다시 치면 거리가 짧은 만큼 빨리 닿음
     this.dur = (this.autoPunch ? 0.07 : STRIKE_T) * (0.45 + 0.55 * clamp(1 - this.s0, 0, 1.1)) / this.speed();
     this.lastPress = now;
     registerPunch(this, now);
-    sfx.whoosh(this.arm.side, this.dur, this.autoPunch ? 0.18 : 0.3);
+    sfx.whoosh(this.arm.side, this.dur, this.autoPunch ? 0.18 : 0.3 + this.punchCharge * 0.28);
   }
   goBack(dur, slow = false) { this.state = 'back'; this.s0 = this.s; this.u = 0; this.dur = dur; this.slow = slow; }
   get t() { return clamp(this.s, 0, 1); }   // 벽(슬라임 움푹 패임)이 읽는 뻗은 정도
@@ -286,12 +341,14 @@ class Fist {
         this.s = this.s0 * (1 - (this.slow ? smooth(this.u) : reboundCurve(this.u)));
         if (this.u >= 1) {
           this.s = 0; this.state = 'idle'; this.slow = false; this.autoPunch = false;
-          if (this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.startPunch(now); }
+          if (this.inputHeld && now >= this.flinchUntil) this.chargeStart = realSeconds();
+          else if (this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.startPunch(now); }
         }
         break;
       }
       case 'idle': {
-        if (this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.autoPunch = false; this.startPunch(now); }
+        if (this.inputHeld && this.chargeStart < 0 && now >= this.flinchUntil) this.chargeStart = realSeconds();
+        else if (!this.inputHeld && this.queue > 0 && now >= this.flinchUntil) { this.queue--; this.autoPunch = false; this.startPunch(now); }
         break;
       }
     }
@@ -338,6 +395,24 @@ class Fist {
     // 휘두르는 호
     out.position.y += Math.sin(sc * Math.PI) * 0.018;
     out.quaternion.slerpQuaternions(P.q0, P.q1, sc);
+    // 충전은 화면 오라가 아니라 실제 자세로 먼저 읽힌다: 더 깊은 당김, 손목 긴장, 미세한 떨림.
+    if ((this.inputHeld && this.chargeStart >= 0 && this.state === 'idle') || (this.state === 'out' && this.punchCharge > 0)) {
+      const launching = this.state === 'out';
+      const held = launching ? CHARGE_FULL : Math.max(0, realSeconds() - this.chargeStart);
+      const prep = launching ? 1 : smooth(clamp(held / CHARGE_START, 0, 1));
+      const charge = launching ? this.punchCharge : smooth(clamp((held - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1));
+      // 손을 놓은 첫 프레임에도 당긴 자세를 유지한 뒤 전진 초반에 풀어, 순간이동처럼 보이는 끊김을 없앤다.
+      const launchFade = launching ? 1 - smooth(clamp(this.u / 0.55, 0, 1)) : 1;
+      const pull = (prep * 0.012 + charge * 0.034) * launchFade;
+      const sg = this.arm.side === 'L' ? -1 : 1;
+      out.position.addScaledVector(P.D1, -pull);
+      out.position.x += sg * charge * 0.006 * launchFade;
+      out.position.y -= charge * 0.007 * launchFade;
+      tmpQ.setFromAxisAngle(AX_X, -(0.05 * prep + 0.13 * charge) * launchFade); out.quaternion.multiply(tmpQ);
+      const trem = launching ? 0 : prep * 0.00025 + charge * 0.00125;
+      out.position.x += Math.sin(rtime * 53 + (sg < 0 ? 0 : 2.1)) * trem;
+      out.position.y += Math.sin(rtime * 47 + 0.8) * trem * 0.7;
+    }
     // 반동: 내지르기 직전 손목을 살짝 젖힘
     if (this.state === 'out' && this.wind) { const w = Math.sin(Math.PI * Math.min(1, this.u / 0.45)) * (1 - this.u); tmpQ.setFromAxisAngle(AX_X, -0.12 * w); out.quaternion.multiply(tmpQ); }
     // 손목 튕김: 맞고 나서 주먹이 들리며 팔이 휨
@@ -388,8 +463,12 @@ function payTkd(group) {
 
 // ------------------------------------------------------------------ 타격
 function onImpact(fist, now) {
-  if (mode !== 'play' || !round || round.ended) { fist.goBack(BACK_T); return; }
+  if (mode !== 'play' || !round || round.ended) { fist.punchCharge = 0; fist.goBack(BACK_T); return; }
   const a = fist.arm;
+  const chargeK = fist.autoPunch ? 0 : clamp(fist.punchCharge || 0, 0, 1);
+  const chargeHit = smooth(chargeK);
+  // 아주 짧은 실수 홀드는 일반타처럼 보이고 들린다. 의미 있게 모은 구간부터 전용 연출을 서서히 연다.
+  const powerFxK = smooth(clamp((chargeK - 0.10) / 0.90, 0, 1));
   const res = { flesh: 0, scrap: 0, ev: [], point: null, finger: -1 };
   const W = wall.def;
   const P = poses(a.side, a);
@@ -401,16 +480,18 @@ function onImpact(fist, now) {
   const base = W.dmg * DAMAGE_PACE * rnd(0.8, 1.2) * (react.dmgMul || 1);
   let left = base;
   if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) {
-    const sd = W.scrapDmg * DAMAGE_PACE * rnd(0.8, 1.25) * (react.dmgMul || 1);
+    // 모아치기는 벽의 종류와 무관하게 충격이 손으로 되돌아온다. 고철은 완충 약 세 번에 붕괴한다.
+    const sd = W.scrapDmg * DAMAGE_PACE * rnd(0.8, 1.25) * (react.dmgMul || 1) + CHARGE_SCRAP * chargeHit;
     a.damageScrap(sd, res);
     scrapBreakFx(a, res, P.contact);
     // 연결부 살도 다침(철사가 파고듦)
-    a.damageFlesh(base * 0.12, W.kind, res);
+    a.damageFlesh(base * 0.12 + CHARGE_JOINT * chargeHit, W.kind, res);
     a.addWound(new THREE.Vector3(rnd(-0.01, 0.01), rnd(-0.004, 0.012), Math.min(a.cutZ, 0.006) - 0.036), 0.03, WT.WIRE, Math.min(1, 0.4 + (140 - a.scrap.lumpHP) / 170));
     a._apply();
     left = 0;
   } else {
-    a.damageFlesh(left, W.kind, res);
+    // 완충 세 번이면 건강한 주먹이 사라질 만큼 고정 자해량을 더한다. 벽에는 피해를 저장하지 않는다.
+    a.damageFlesh(left + CHARGE_FLESH * chargeHit, W.kind, res);
   }
   // 크레딧
   const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
@@ -424,16 +505,25 @@ function onImpact(fist, now) {
   fx.impact(a, P.contact, power, res, W, react);
   fx.impactDust(P.contact, W.id, feel, striker);
   sfx.impact(W.id, res, power, a, a.side, feel);
+  if (powerFxK >= 0.04) {
+    const scrap = striker === 'scrap' || striker === 'pipe';
+    fx.powerImpact?.(P.contact, { strength: powerFxK, scrap, side: a.side, full: chargeK >= 0.98 });
+    sfx.powerImpact?.(a.side, scrap, powerFxK);
+  }
   for (const e of res.ev) handleEvent(a, e, P.contact);
   dropCrushed(a);
   a.kick(power);
   // 멈춤: 연타 중엔 짧게, 뼈가 부러지거나 떨어져 나가면 길게
-  const hs = (react.stick ? 0.045 : 0.052 + tier * 0.014) / (1 + 0.35 * rush) + Math.min(0.09, evW * 0.12);
+  const pacedHs = (react.stick ? 0.045 : 0.052 + tier * 0.014) / (1 + 0.35 * rush) + Math.min(0.09, evW * 0.12);
+  // 난타 중에도 벽에 닿은 프레임은 읽히게 하되, 입력 리듬을 막을 만큼 길게 멈추지는 않는다.
+  const normalHs = Math.max(0.034, pacedHs);
+  const hs = Math.max(normalHs, 0.034 + powerFxK * 0.056);
   hitstop = Math.max(hitstop, hs);
-  fist.hitFeel(feel, react, a, hs);
+  fist.hitFeel(feel + chargeHit * 0.55, react, a, hs);
   camKick(a.side, feel, evW);
+  if (powerFxK >= 0.04) camPowerKick(a.side, powerFxK);
   rush = Math.min(6, rush + 1);
-  vibrate(res.ev.length ? [30, 25, 30] : Math.round(16 + feel * 10));
+  vibrate(chargeK > 0.85 ? [45, 35, 70] : res.ev.length ? [30, 25, 30] : Math.round(16 + feel * 10));
   round.punches++;
   // 걸림 상태
   if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckTaps = react.taps || 3; fist.stuckT = 0; showHint('stuck'); }
@@ -443,6 +533,7 @@ function onImpact(fist, now) {
   else if (fist.autoPunch && fist.spasm > 0) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.07; }
   else if (fist.autoPunch) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.05; }
   if (react.flinch) fist.flinchUntil = now + react.flinch;
+  fist.punchCharge = 0;
   checkRoundEnd();
 }
 
@@ -556,6 +647,7 @@ function resetArmMotion(side) {
 }
 
 function newRound() {
+  cancelAllInputs();
   round = { punches: 0, earned: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false, endT: 0 };
   chain = [];
   for (const s of ['L', 'R']) resetArmMotion(s);
@@ -568,6 +660,7 @@ function checkRoundEnd() {
   const L = arms.L, R = arms.R;
   if (!L.hasFist() && !R.hasFist()) {
     round.ended = true; round.endT = time;
+    cancelAllInputs();
     // 판이 끝나면 남은 입력·감전 연타를 멈추고 팔만 가드로 돌아옴.
     for (const f of Object.values(fists)) {
       f.queue = 0; f.autoPunch = false; f.pendingChain = null; f.spasm = 0;
@@ -580,6 +673,7 @@ function checkRoundEnd() {
 
 function endRound() {
   if (mode !== 'play') return;
+  cancelAllInputs();
   mode = 'shop';
   document.body.classList.remove('playing');
   fx.persist();
@@ -601,7 +695,7 @@ function armSnapshot(a) {
 function setWall(id) {
   const def = WALLS.find((w) => w.id === id) || WALLS[0];
   id = def.id;
-  if (wall) { fx.persist(); wall.dispose(); }
+  if (wall) { fx.clearPowerImpact?.(); fx.persist(); wall.dispose(); }
   wall = createWall(id, { scene, renderer, fx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
   G.wall = id;
   fx.bindWall(wall);
@@ -613,25 +707,98 @@ function setWall(id) {
 
 // ------------------------------------------------------------------ 입력
 const fists = {};
+const KEY_SIDE = new Map([
+  ['KeyF', 'L'], ['KeyA', 'L'], ['ArrowLeft', 'L'], ['KeyD', 'L'], ['KeyS', 'L'],
+  ['KeyJ', 'R'], ['KeyL', 'R'], ['ArrowRight', 'R'], ['KeyK', 'R'], ['Semicolon', 'R'],
+]);
+const inputOwner = { L: null, R: null };
+const pointerInputs = new Map();
+const mouseInputs = new Map();
+const keyInputs = new Map();
+
+function beginSideHold(side, token) {
+  sfx.unlock();
+  if (mode !== 'play' || !fists[side] || inputOwner[side] !== null) return false;
+  if (!fists[side].beginHold(time, realSeconds())) return false;
+  inputOwner[side] = token;
+  return true;
+}
+function finishSideHold(side, token, cancel = false) {
+  if (!side || inputOwner[side] !== token || !fists[side]) return;
+  inputOwner[side] = null;
+  fists[side].endHold(time, realSeconds(), cancel);
+}
+function cancelAllInputs() {
+  for (const side of ['L', 'R']) {
+    if (fists[side]) fists[side].cancelHold();
+    inputOwner[side] = null;
+  }
+  pointerInputs.clear();
+  mouseInputs.clear();
+  keyInputs.clear();
+}
+
+// 디버그 자동 테스트는 기존 즉시 타격을 그대로 쓴다.
 function pressSide(side) {
   sfx.unlock();
   if (mode === 'play') fists[side].press(time);
 }
 window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;
-  const k = e.code;
-  if (['KeyF', 'KeyA', 'ArrowLeft', 'KeyD', 'KeyS'].includes(k)) { pressSide('L'); e.preventDefault(); }
-  if (['KeyJ', 'KeyL', 'ArrowRight', 'KeyK', 'Semicolon'].includes(k)) { pressSide('R'); e.preventDefault(); }
+  const side = KEY_SIDE.get(e.code);
+  if (!side) return;
+  e.preventDefault();
+  if (e.repeat || keyInputs.has(e.code)) return;
+  const token = 'key:' + e.code;
+  if (beginSideHold(side, token)) keyInputs.set(e.code, side);
 });
+window.addEventListener('keyup', (e) => {
+  const side = keyInputs.get(e.code);
+  if (!side) return;
+  e.preventDefault();
+  keyInputs.delete(e.code);
+  finishSideHold(side, 'key:' + e.code, false);
+});
+
+// 터치·펜은 누른 화면의 좌우를 각각 독립적으로 잡는다.
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') return;
+  const side = e.clientX < innerWidth / 2 ? 'L' : 'R';
+  e.preventDefault();
+  const token = `pointer:${e.pointerId}`;
+  if (!beginSideHold(side, token)) return;
+  pointerInputs.set(token, side);
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+}, { passive: false });
+function finishPointer(e, cancel) {
+  const token = `pointer:${e.pointerId}`;
+  const side = pointerInputs.get(token);
+  if (!side) return;
+  pointerInputs.delete(token);
+  finishSideHold(side, token, cancel);
+}
+canvas.addEventListener('pointerup', (e) => { e.preventDefault(); finishPointer(e, false); }, { passive: false });
+canvas.addEventListener('pointercancel', (e) => finishPointer(e, true));
+canvas.addEventListener('lostpointercapture', (e) => finishPointer(e, true));
+
+// Pointer Events는 마우스의 첫 버튼 down/마지막 버튼 up만 보장한다.
+// 양 버튼을 겹쳐 눌러 양손을 동시에 모을 수 있도록 마우스는 버튼별 이벤트로 따로 관리한다.
 canvas.addEventListener('mousedown', (e) => {
-  if (e.button === 0) pressSide('L');
-  else if (e.button === 2) pressSide('R');
+  const side = e.button === 0 ? 'L' : e.button === 2 ? 'R' : null;
+  if (!side) return;
+  e.preventDefault();
+  const token = `mouse:${e.button}`;
+  if (mouseInputs.has(e.button) || !beginSideHold(side, token)) return;
+  mouseInputs.set(e.button, side);
+});
+window.addEventListener('mouseup', (e) => {
+  const side = mouseInputs.get(e.button);
+  if (!side) return;
+  mouseInputs.delete(e.button);
+  finishSideHold(side, `mouse:${e.button}`, false);
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  for (const t of e.changedTouches) pressSide(t.clientX < innerWidth / 2 ? 'L' : 'R');
-}, { passive: false });
+window.addEventListener('blur', cancelAllInputs);
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAllInputs(); });
 
 function vibrate(p) { try { if (navigator.vibrate && G.vibrate !== false) navigator.vibrate(p); } catch (e) {} }
 
@@ -769,7 +936,7 @@ async function boot() {
   const hadSave = load();
   assets = await loadArmAssets();
   initAnatomy(assets.header);
-  fx = new FX(scene, renderer, G);
+  fx = new FX(scene, renderer, G, lightPool);
   fx.anat = ANAT;
   sfx = new SFX();
   await sfx.prepare();
