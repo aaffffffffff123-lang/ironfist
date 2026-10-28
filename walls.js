@@ -1,21 +1,25 @@
 // 철권 — 벽 9종
 import * as THREE from 'three';
+import { Scrap } from './scrap.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
-// 벽 정의 — dmg: 살 손실(0~1 단위), scrapDmg: 고철 피해, mult: 크레딧 배율, fear: 대기 중 주먹 떨림
+// 벽 정의 — dmg: 살 손실(0~1 단위), scrapDmg: 고철 피해, mult: 참을성 배율, fear: 처음 열었을 때 대기 중 주먹 떨림
+// pace·space: 이 벽에서 살·고철이 닳는 빠르기. 어느 벽이든 맨손 한 판이 보통 속도로 2분 안팎, 고철 한 판이 1분 안팎이 되게 맞춤
 export const WALLS = [
-  { id: 'cement', name: '시멘트 벽', desc: '기본 벽.', price: 0, mult: 1.0, dmg: 0.0115, scrapDmg: 8, fear: 0.0, kind: {} },
-  { id: 'gravel', name: '자갈 박힌 벽', desc: '울퉁불퉁. 칠 때마다 살갗이 갈려 나감.', price: 1100, mult: 1.6, dmg: 0.0135, scrapDmg: 9, fear: 0.15, kind: { abr: 0.45 } },
-  { id: 'glass', name: '소주병 조각 벽', desc: '유리가 손에 박힌 채 남고, 박힌 데서 피가 계속 새서 팔이 저절로 닳음.', price: 2700, mult: 3.4, dmg: 0.0150, scrapDmg: 10, fear: 0.45, kind: { cut: 0.75, punct: 1 } },
-  { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 꿰여 안 빠짐. 같은 쪽을 몇 번 눌러 뜯어내야 함.', price: 3800, mult: 5.6, dmg: 0.0160, scrapDmg: 11, fear: 0.6, kind: { punct: 3 } },
-  { id: 'freezer', name: '냉동창고 벽', desc: '언 쇠에 살이 쩍 들러붙음. 뗄 때 가죽이 벗겨짐.', price: 5400, mult: 6.6, dmg: 0.0170, scrapDmg: 10, fear: 0.6, kind: {} },
-  { id: 'hotplate', name: '달군 철판', desc: '살이 눌어붙어 탐. 데인 손은 다음 주먹이 한 박자 늦게 나감.', price: 7300, mult: 9.0, dmg: 0.0185, scrapDmg: 12, fear: 0.75, kind: { burn: 0.45 } },
-  { id: 'slime', name: '슬라임 벽', desc: '쑥 빨려 들어가 빼는 데 오래 걸림. 산성이라 빼 보면 살이 녹아 있음.', price: 10000, mult: 12.0, dmg: 0.0190, scrapDmg: 13, fear: 0.5, kind: { acid: 0.45 } },
-  { id: 'electric', name: '전기 벽', desc: '감전되면 팔이 경련하며 혼자 몇 대 더 침.', price: 13300, mult: 15.5, dmg: 0.0200, scrapDmg: 14, fear: 0.9, kind: { elec: 0.55 } },
-  { id: 'spikes', name: '쇠꼬챙이 가시벽', desc: '주먹을 뚫고 팔뚝까지 꿰여 그 팔을 몇 초 못 씀.', price: 17100, mult: 20.0, dmg: 0.0260, scrapDmg: 18, fear: 1.0, kind: { punct: 1 } },
+  { id: 'cement', name: '시멘트 벽', desc: '기본 벽.', mult: 1.0, dmg: 0.0115, scrapDmg: 8, pace: 0.44, space: 0.35, fear: 0.0, kind: {} },
+  { id: 'gravel', name: '자갈 박힌 벽', desc: '울퉁불퉁. 칠 때마다 살갗이 갈려 나감.', mult: 1.6, dmg: 0.0135, scrapDmg: 9, pace: 0.375, space: 0.3, fear: 0.15, kind: { abr: 0.45 } },
+  { id: 'glass', name: '소주병 조각 벽', desc: '유리가 손에 박힌 채 남고, 박힌 데서 피가 계속 새서 팔이 저절로 닳음.', mult: 3.4, dmg: 0.0150, scrapDmg: 10, pace: 0.28, space: 0.28, fear: 0.45, kind: { cut: 0.75, punct: 1 } },
+  { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 꿰여 안 빠짐. 같은 쪽을 몇 번 눌러 뜯어내야 함.', mult: 5.6, dmg: 0.0160, scrapDmg: 11, pace: 0.45, space: 0.35, fear: 0.6, kind: { punct: 3 } },
+  { id: 'freezer', name: '냉동창고 벽', desc: '언 쇠에 살이 쩍 들러붙음. 뗄 때 가죽이 벗겨짐.', mult: 6.6, dmg: 0.0170, scrapDmg: 10, pace: 0.38, space: 0.3, fear: 0.6, kind: {} },
+  { id: 'hotplate', name: '달군 철판', desc: '살이 눌어붙어 탐. 데인 손은 다음 주먹이 한 박자 늦게 나감.', mult: 9.0, dmg: 0.0185, scrapDmg: 12, pace: 0.28, space: 0.23, fear: 0.75, kind: { burn: 0.45 } },
+  { id: 'slime', name: '슬라임 벽', desc: '쑥 빨려 들어가 빼는 데 오래 걸림. 산성이라 빼 보면 살이 녹아 있음.', mult: 12.0, dmg: 0.0190, scrapDmg: 13, pace: 0.41, space: 0.18, fear: 0.5, kind: { acid: 0.45 } },
+  { id: 'electric', name: '전기 벽', desc: '감전되면 팔이 경련하며 혼자 몇 대 더 침.', mult: 15.5, dmg: 0.0200, scrapDmg: 14, pace: 0.085, space: 0.072, fear: 0.9, kind: { elec: 0.55 } },
+  { id: 'spikes', name: '쇠꼬챙이 가시벽', desc: '주먹을 뚫고 팔뚝까지 꿰여 그 팔을 몇 초 못 씀.', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
 ];
+// 가시벽에 먼저 다녀간 사람이 남긴 고철 주먹이 꿰여 있는 꼬챙이 자리(벽 좌표)
+export const OLD_FIST_AT = { x: -0.0975, y: 0.135 };
 
 // ------------------------------------------------------------------ GLSL
 export const NOISE2 = /* glsl */`
@@ -83,15 +87,19 @@ export function patchSurface(mat, surf, opts = {}) {
       float ba = smoothstep(0.42, 0.85, bm.a);
       vec3 bc = mix(vec3(0.05,0.02,0.015), vec3(0.20,0.05,0.025), bm.r * 3.0);
       col = mix(col, bc, ba * 0.95); rough = mix(rough, 0.75, ba); hgt += ba * 0.4;
-      emis *= 1.0 - ba * 0.85;` : bloodMode === 'frozen' ? `
+      // 오래전에 눌어붙어 새까맣게 탄 딱지(아주 어두운 자국)는 철판이 달아도 빛이 비치지 않음
+      float charK = 1.0 - smoothstep(0.02, 0.07, bm.r);
+      emis *= 1.0 - ba * (0.85 + 0.14 * charK);` : bloodMode === 'frozen' ? `
       vec4 bm = bloodAt(p);
       col = mix(col, bm.rgb * vec3(0.62, 0.42, 0.5), bm.a * 0.95);
       col = mix(col, vec3(0.78, 0.84, 0.9), bm.a * smoothstep(0.8, 0.95, vn(vec3(p*700.0, 1.0))) * 0.3);
       rough = mix(rough, 0.18, bm.a); metal = mix(metal, 0.0, bm.a); hgt += bm.a * 0.4;` : `
       vec4 bm = bloodAt(p);
+      // 갓 묻은 피는 붉고 번들거림, 오래 말라붙은 피는 갈색이고 광이 없음(색의 붉은 정도로 가름)
+      float wet = smoothstep(0.80, 0.94, (bm.r - bm.g) / max(bm.r, 0.004));
       col = mix(col, bm.rgb, bm.a * 0.97);
-      rough = mix(rough, 0.16, smoothstep(0.1, 0.7, bm.a)); metal = mix(metal, 0.0, bm.a);
-      hgt += bm.a * 0.5;`) : ''}
+      rough = mix(rough, mix(0.66, 0.16, wet), smoothstep(0.1, 0.7, bm.a)); metal = mix(metal, 0.0, bm.a);
+      hgt += bm.a * (0.16 + 0.34 * wet);`) : ''}
       diffuseColor.rgb = col;
     `);
     f = f.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = rough;');
@@ -135,6 +143,54 @@ const S_CEMENT = /* glsl */`
   col *= 1.0 - crack * 0.45 - chip * 0.07;
   hgt = n2 * 0.5 + sw * 0.35 + n3 * 0.15 + tw * 0.25 - pores * 0.9 - pores2 * 0.5 - crack * 0.8;
   rough = 0.88 - n2 * 0.08 - damp * 0.06;
+`;
+// 칠한 시멘트 벽: 학교 복도·생활관·관공서 벽처럼 허리께 아래는 초록 유성페인트, 위는 미색. 오래돼서 군데군데 벗겨짐
+export const PAINT_LINE_Y = -0.235;
+const S_PAINT = /* glsl */`
+  // 벗겨진 데로 보이는 밑바탕 시멘트
+  vec3 cc = srgb(vec3(0.64, 0.62, 0.58)) * (0.84 + 0.26 * fb2(p * 2.2)) * (0.92 + 0.14 * fb2(p * 17.0 + 4.0));
+  float cpore = smoothstep(0.80, 0.92, vn2(p * 520.0 + 7.0));
+  cc *= 1.0 - cpore * 0.4;
+  // 시멘트가 갈라진 데는 칠도 같이 갈라짐
+  vec2 cq = p * 3.6 + vec2(vn2(p * 38.0), vn2(p * 38.0 + 5.3)) * 0.055 + vec2(fb2(p * 6.0), fb2(p * 6.0 + 2.7)) * 0.22;
+  float ce = vEdge(cq);
+  float cmask = smoothstep(0.50, 0.62, fb2(p * 1.6 + 5.0));
+  float cw = 0.006 + 0.007 * vn2(p * 21.0);
+  float caa = fwidth(ce) * 0.8;
+  float crack = (1.0 - smoothstep(cw - caa, cw + caa, ce)) * cmask;
+  // 두 색 경계(테이프 붙여 칠한 선이 세월에 살짝 울퉁불퉁)
+  float yb = ${PAINT_LINE_Y.toFixed(3)} + (vn2(vec2(p.x * 2.3, 4.1)) - 0.5) * 0.0024;
+  float ya = fwidth(p.y) * 1.2;
+  float green = 1.0 - smoothstep(yb - ya, yb + ya, p.y);
+  float stripe = (1.0 - green) * (1.0 - smoothstep(yb + 0.012 - ya, yb + 0.012 + ya, p.y));
+  vec3 cream = srgb(vec3(0.93, 0.89, 0.785));
+  vec3 grn = srgb(vec3(0.235, 0.425, 0.315));
+  vec3 dgrn = srgb(vec3(0.115, 0.245, 0.175));
+  vec3 pc = mix(mix(cream, grn, green), dgrn, stripe);
+  // 롤러·붓 자국, 덧칠 얼룩
+  float roll = fb2(vec2(p.x * 1.4, p.y * 34.0) + 3.0);
+  float brush = fb2(vec2(p.x * 70.0, p.y * 2.4) + 7.0);
+  float patchy = fb2(p * 3.2 + 17.0);
+  pc *= 0.955 + 0.06 * mix(roll, brush, green) + 0.05 * (patchy - 0.5);
+  // 미색은 누렇게 바래고, 경계 언저리엔 손때
+  pc = mix(pc, pc * srgb(vec3(0.96, 0.91, 0.78)), smoothstep(0.35, 0.8, fb2(p * 1.7 + 12.0)) * (1.0 - green) * 0.75);
+  float grime = (1.0 - smoothstep(0.0, 0.07, abs(p.y - yb))) * smoothstep(0.4, 0.8, fb2(p * vec2(5.0, 11.0) + 2.0));
+  pc *= 1.0 - grime * 0.15;
+  // 초록 칸: 신발·수레에 긁힌 자국
+  float scuff = green * smoothstep(0.70, 0.88, fb2(vec2(p.x * 7.0, p.y * 26.0) + 5.0)) * smoothstep(yb - 0.03, yb - 0.22, p.y);
+  pc = mix(pc, pc * 0.55 + srgb(vec3(0.06)), scuff * 0.5);
+  // 칠이 벗겨진 자리: 드문드문 작게. 아래 초록 칸과 경계 근처에 조금 더
+  float cn = fb2(p * 9.0 + 31.0) * 0.8 + vn2(p * 55.0) * 0.26 + vn2(p * 190.0) * 0.07;
+  float chipT = 0.86 - 0.045 * smoothstep(-0.1, -0.55, p.y) - 0.04 * (1.0 - smoothstep(0.0, 0.04, abs(p.y - yb)));
+  float chip = smoothstep(chipT, chipT + 0.01, cn);
+  float lip = smoothstep(chipT - 0.022, chipT, cn) * (1.0 - chip);
+  col = mix(pc, cc, chip);
+  col *= 1.0 - lip * 0.16;
+  col *= 1.0 - crack * mix(0.32, 0.5, chip);
+  // 칠은 매끈하게 광이 나고(초록 에나멜이 더), 벗겨진 데는 거칠게
+  float orange = vn2(p * 420.0);
+  hgt = orange * 0.05 + roll * 0.06 + lip * 0.25 - chip * 0.35 + chip * fb2(p * 17.0 + 4.0) * 0.5 - crack * 0.6;
+  rough = mix(mix(0.5, 0.3, green), 0.9, chip) + scuff * 0.2 + grime * 0.08 + orange * 0.03;
 `;
 const S_GRAVELBASE = /* glsl */`
   vec3 c0 = srgb(vec3(0.58, 0.56, 0.53));
@@ -319,7 +375,7 @@ function scatterGrid(x0, x1, y0, y1, step, jitter, fn) {
 
 // ------------------------------------------------------------------ 1. 시멘트
 class CementWall extends WallBase {
-  constructor(def, ctx) { super(def, ctx); this.basePlane(S_CEMENT, { bump: 0.9 }); }
+  constructor(def, ctx) { super(def, ctx); this.basePlane(S_PAINT, { bump: 0.8 }); }
 }
 
 // ------------------------------------------------------------------ 2. 자갈
@@ -923,6 +979,43 @@ class SpikeWall extends WallBase {
     this.add(im);
     this.L = L;
     this.stopDepth = 0.13;
+    this.addOldFist();
+  }
+  // 먼저 다녀간 사람의 고철 주먹: 꼬챙이에 꿰인 채 버려져 녹슬어 있음
+  addOldFist() {
+    const holder = { attach: { forearm: new THREE.Group() }, cutZ: -0.03, traps: [] };
+    const sc = new Scrap(holder, 4243);
+    if (sc.glow) sc.glow.parent && sc.glow.parent.remove(sc.glow);
+    const g = holder.attach.forearm;
+    const rustSurf = `
+      float r1 = fb(wp * 140.0); float r2 = vn(wp * 900.0); float r3 = fb(wp * 37.0 + 5.0);
+      col = mix(srgb(vec3(0.38, 0.21, 0.11)), srgb(vec3(0.19, 0.13, 0.10)), smoothstep(0.35, 0.75, r1));
+      col = mix(col, srgb(vec3(0.55, 0.31, 0.14)), smoothstep(0.72, 0.9, r2) * 0.55);
+      col *= TINT;
+      metal = 0.35 * smoothstep(0.62, 0.9, r1 * r3 * 1.6); rough = 0.88 - 0.22 * smoothstep(0.62, 0.9, r1);
+      hgt = r1 * 0.6 + r2 * 0.35;
+    `;
+    const rustA = patchSurface(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.3 }), rustSurf.replace('TINT', 'vec3(1.0)'), { key: 'oldrustA', bump: 0.5 });
+    const rustB = patchSurface(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.3 }), rustSurf.replace('TINT', 'vec3(0.78, 0.74, 0.72)'), { key: 'oldrustB', bump: 0.5 });
+    const tape = patchSurface(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0.05 }), `
+      col = srgb(vec3(0.46, 0.42, 0.36)) * (0.75 + 0.35 * fb(wp * 220.0)); rough = 0.95; metal = 0.02; hgt = vn(wp * 700.0) * 0.4;
+    `, { key: 'oldtape', bump: 0.3 });
+    let k = 0;
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      const m = o.material;
+      if (m.side === THREE.BackSide) return;   // 쇠파이프 안쪽
+      const isTape = m.metalness < 0.5 && m.roughness > 0.55 && m.roughness < 0.7;
+      o.material = isTape ? tape : (k++ % 3 === 0 ? rustB : rustA);
+      o.castShadow = true; o.receiveShadow = true;
+    });
+    // 주먹 앞(+z)이 벽을 향하게 뒤집고, 바깥으로 나온 쇠파이프 쪽이 아래로 처짐. 덩어리 가운데로 꼬챙이가 지나감
+    const P = OLD_FIST_AT;
+    g.rotation.set(0.3, Math.PI + 0.12, 0.35);
+    g.position.set(P.x + 0.008, P.y - 0.013, -this.D + 0.164);
+    g.updateMatrixWorld(true);
+    this.add(g);
+    this.oldFist = g;
   }
   // 타격 지점을 가장 가까운 꼬챙이에 맞춤
   snapContact(c) {

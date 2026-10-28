@@ -1,6 +1,6 @@
 // 철권 — 효과: 피 지도(벽에 묻는 피), 핏방울, 살점·뼛조각·찢긴 살가죽, 연기·김·거품·불꽃·전기
 import * as THREE from 'three';
-import { SHARED, rockGeo } from './walls.js';
+import { SHARED, rockGeo, OLD_FIST_AT } from './walls.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -176,9 +176,64 @@ class BloodMap {
       for (let i = 0; i <= 12; i++) { const a = (i / 12) * Math.PI * 2; const rr = s * (0.7 + Math.sin(i * 3.1 + seed * 9) * 0.25); i ? x.lineTo(Math.cos(a) * rr, Math.sin(a) * rr * 0.7) : x.moveTo(Math.cos(a) * rr, Math.sin(a) * rr * 0.7); }
       x.fill();
       x.fillStyle = 'rgba(160,30,25,0.8)'; x.beginPath(); x.arc(0, 0, s * 0.35, 0, 7); x.fill();
+    } else if (t === 'o') {
+      this.drawOld(op);
     }
     x.restore();
     this.dirty = true;
+  }
+  // 먼저 다녀간 사람들의 자국: 오래 말라붙어 갈색으로 바랜 피, 얼어붙은 남의 살가죽
+  // ['o', 종류(0 자국 1 흘러내림 2 살가죽 3 끌린 자국), x, y, 크기, 모양(그림 번호·굵기), 각도, 세월(0~1), 짙기(1~)]
+  // 짙기: 나무·달군 철판처럼 마른 피가 묻혀 안 보이는 바탕에서 더 짙고 검게
+  drawOld(op) {
+    const [, sub, wx, wy, size, v, rot, age, boost = 1] = op;
+    const x = this.ctx;
+    const k = BM_SIZE / this.rect.z;
+    const [px, py] = this.px(wx, wy);
+    const dk = 1 - (boost - 1) * 0.7;
+    const r = Math.round((70 + age * 10) * dk), g = Math.round((30 + age * 28) * dk), b = Math.round((21 + age * 22) * dk);
+    const a = Math.min(1, (0.82 - age * 0.4) * boost);
+    x.save();
+    if (sub === 0) {
+      const t = this.oldTmp || (this.oldTmp = document.createElement('canvas'));
+      t.width = t.height = 256;
+      const c = t.getContext('2d');
+      c.drawImage(this.sprites[v], 0, 0);
+      // 그림의 짙고 옅은 결은 남기고 색만 마른 피로
+      c.globalCompositeOperation = 'source-atop';
+      c.fillStyle = `rgba(${r},${g},${b},0.86)`; c.fillRect(0, 0, 256, 256);
+      const s = size * k;
+      x.translate(px, py); x.rotate(rot); x.globalAlpha = a;
+      // 아주 짙게(달군 철판): 두 번 찍어 빈틈 없이 눌어붙은 딱지로
+      for (let i = boost >= 1.5 ? 2 : 1; i > 0; i--) x.drawImage(t, -s, -s, s * 2, s * 2);
+    } else if (sub === 1) {
+      const L = size * k, Wd = Math.max(1.2, v * k);
+      x.globalAlpha = a * 0.9;
+      x.fillStyle = `rgb(${r - 6},${g - 4},${b - 3})`;
+      x.beginPath(); x.moveTo(px - Wd / 2, py); x.lineTo(px + Wd / 2, py);
+      x.quadraticCurveTo(px + Wd * 0.5 + rot * L * 0.06, py + L * 0.5, px + Wd * 0.3, py + L);
+      x.arc(px, py + L, Wd * 0.62, 0, Math.PI);
+      x.quadraticCurveTo(px - Wd * 0.5 + rot * L * 0.06, py + L * 0.5, px - Wd / 2, py);
+      x.closePath(); x.fill();
+    } else if (sub === 2) {
+      const s = size * k;
+      x.translate(px, py); x.rotate(rot);
+      x.globalAlpha = 0.9 - age * 0.25;
+      x.fillStyle = `rgb(${Math.round(196 - age * 30)},${Math.round(170 - age * 26)},${Math.round(158 - age * 20)})`;
+      x.beginPath();
+      for (let i = 0; i <= 12; i++) { const an = (i / 12) * Math.PI * 2; const rr = s * (0.7 + Math.sin(i * 2.7 + rot * 9) * 0.25); i ? x.lineTo(Math.cos(an) * rr, Math.sin(an) * rr * 0.7) : x.moveTo(Math.cos(an) * rr, Math.sin(an) * rr * 0.7); }
+      x.fill();
+      x.fillStyle = `rgba(${r},${g},${b},0.85)`; x.beginPath(); x.arc(s * 0.1, 0, s * 0.3, 0, 7); x.fill();
+    } else if (sub === 3) {
+      // 주먹을 댄 채 아래로 끌려 내려간 자국(너클 줄무늬)
+      const L = size * k, Wd = v * k;
+      x.translate(px, py); x.rotate(rot);
+      const gr = x.createLinearGradient(0, 0, L, 0);
+      gr.addColorStop(0, `rgba(${r},${g},${b},${a})`); gr.addColorStop(0.65, `rgba(${r},${g},${b},${a * 0.6})`); gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      x.fillStyle = gr;
+      for (let i = 0; i < 4; i++) { const yy = (i / 3 - 0.5) * Wd; x.fillRect(0, yy - Wd * 0.09, L * (0.75 + 0.25 * Math.sin(i * 2.3 + rot)), Wd * 0.17); }
+    }
+    x.restore();
   }
   update(dt, time) {
     for (const d of this.drips) {
@@ -193,7 +248,51 @@ class BloodMap {
     if (this.dirty && time - this.lastUp > 0.07) { this.tex.needsUpdate = true; this.dirty = false; this.lastUp = time; }
   }
   clear() { this.ctx.clearRect(0, 0, BM_SIZE, BM_SIZE); this.ops = []; this.drips = []; this.dirty = true; }
-  load(ops) { this.clear(); this.ops = (ops || []).slice(); for (const op of this.ops) this.drawOp(op, true); this.dirty = true; }
+  // old: 먼저 다녀간 사람들의 자국 — 맨 밑에 깔고, 내 피 기록과 따로 둬서 오래 쳐도 지워지지 않음
+  load(ops, old) {
+    this.clear();
+    for (const op of old || []) this.drawOp(op);
+    this.ops = (ops || []).slice();
+    for (const op of this.ops) this.drawOp(op, true);
+    this.dirty = true;
+  }
+}
+
+// 새로 연 벽에 처음부터 있는 남의 자국(벽 좌표). 첫 벽(시멘트)에는 없음
+export function makeOldMarks(id) {
+  const ops = [];
+  const R = Math.random, f4 = (v) => +v.toFixed(4), f2 = (v) => +v.toFixed(2);
+  const dripK = id === 'freezer' ? 0.3 : id === 'hotplate' ? 0.22 : id === 'slime' ? 0 : 1;
+  const boost = id === 'nails' ? 1.35 : id === 'hotplate' ? 1.8 : 1;
+  // 다녀간 사람마다 선 자리·키·어깨너비가 달라 주먹 자리가 조금씩 다름. 앞사람일수록 오래돼 바램
+  const people = 3 + Math.floor(R() * 3);
+  for (let n = 0; n < people; n++) {
+    const cx = rnd(-0.025, 0.025), h = rnd(-0.17, 0.08), sp = rnd(0.036, 0.085);
+    const age = clamp(0.95 - 0.75 * (n + 1) / people + rnd(-0.08, 0.12), 0.12, 1);
+    for (const sg of [-1, 1]) {
+      const m = 1 + Math.floor(R() * 2.4);
+      for (let i = 0; i < m; i++) {
+        ops.push(['o', 0, f4(cx + sg * sp + rnd(-0.014, 0.014)), f4(h + rnd(-0.014, 0.014)), f4(rnd(0.03, 0.046)), Math.floor(R() * 6), f2(sg * rnd(0.05, 0.35)), f2(clamp(age + rnd(-0.1, 0.1), 0, 1)), boost]);
+      }
+      if (R() < 0.55) ops.push(['o', 0, f4(cx + sg * sp + rnd(-0.04, 0.04)), f4(h + rnd(-0.035, 0.035)), f4(rnd(0.012, 0.024)), 6 + Math.floor(R() * 4), f2(rnd(0, 6.28)), f2(age), boost]);
+      if (dripK && R() < 0.6) ops.push(['o', 1, f4(cx + sg * sp + rnd(-0.016, 0.016)), f4(h - rnd(0.004, 0.014)), f4(rnd(0.05, 0.2) * dripK), f4(rnd(0.0022, 0.0042)), f2(rnd(-1, 1)), f2(age), boost]);
+    }
+  }
+  // 한 사람은 주먹을 벽에 댄 채 주저앉음
+  if (dripK === 1 && id !== 'spikes' && R() < 0.85) {
+    const sg = R() < 0.5 ? -1 : 1;
+    ops.push(['o', 3, f4(sg * rnd(0.04, 0.07)), f4(rnd(-0.08, 0.0)), f4(rnd(0.12, 0.22)), f4(rnd(0.022, 0.03)), f2(Math.PI / 2 + rnd(-0.12, 0.12)), f2(rnd(0.25, 0.7)), boost]);
+  }
+  // 냉동창고: 뜯겨 얼어붙은 남의 살가죽
+  if (id === 'freezer') for (let i = 0; i < 6; i++) ops.push(['o', 2, f4(rnd(-0.11, 0.11)), f4(rnd(-0.15, 0.06)), f4(rnd(0.006, 0.013)), 0, f2(rnd(0, 6.28)), f2(R())]);
+  // 가시벽: 꿰인 채 남은 고철 주먹 밑으로 말라붙은 피
+  if (id === 'spikes') {
+    const P = OLD_FIST_AT;
+    ops.push(['o', 0, f4(P.x + rnd(-0.01, 0.01)), f4(P.y - 0.02), 0.03, 6 + Math.floor(R() * 4), f2(rnd(0, 6.28)), 0.7]);
+    ops.push(['o', 1, f4(P.x + 0.004), f4(P.y - 0.03), 0.16, 0.0035, 0.4, 0.75]);
+    ops.push(['o', 1, f4(P.x - 0.012), f4(P.y - 0.026), 0.09, 0.0026, -0.5, 0.8]);
+  }
+  return ops;
 }
 
 // ------------------------------------------------------------------ 부드러운 점 입자
@@ -441,6 +540,10 @@ export class FX {
     this.flying = [];          // 날아가는 살점·뼛조각·부품(메시)
     this.stuckGroup = new THREE.Group(); scene.add(this.stuckGroup);
     this.stuckList = [];
+    // 먼저 다녀간 사람들이 남긴 마른 살점(못·꼬챙이·철판·슬라임)
+    this.oldGroup = new THREE.Group(); scene.add(this.oldGroup);
+    this.driedMat = new THREE.MeshStandardMaterial({ color: 0x3d1b12, roughness: 0.86, metalness: 0 });
+    this.charMat = new THREE.MeshStandardMaterial({ color: 0x1d130f, roughness: 0.95, metalness: 0 });
     // 입자
     this.smoke = new Puffs(160, { color: 0xbdb5ad, size: 0.03, opacity: 0.35 }); scene.add(this.smoke.obj);
     this.steam = new Puffs(120, { color: 0xffffff, size: 0.025, opacity: 0.25 }); scene.add(this.steam.obj);
@@ -492,8 +595,37 @@ export class FX {
     const dc = DUST[wall.def.id];
     if (dc) { this.dust.mat.uniforms.uColor.value.set(dc.dust); this.grit.mat.uniforms.uColor.value.set(dc.grit); }
     this.stuckScrap = [];
-    this.blood.load((this.G.decals || {})[wall.def.id]);
+    this.blood.load((this.G.decals || {})[wall.def.id], this.oldMarks(wall.def.id));
     this.loadStuck((this.G.stuck || {})[wall.def.id]);
+    this.placeOldBits(wall);
+  }
+  // 벽마다 한 번 만들어 저장(다음에 와도 같은 자리)
+  oldMarks(id) {
+    if (id === 'cement') return [];
+    this.G.old = this.G.old || {};
+    if (!Array.isArray(this.G.old[id])) this.G.old[id] = makeOldMarks(id);
+    return this.G.old[id];
+  }
+  placeOldBits(wall) {
+    this.oldGroup.clear();
+    const id = wall.def.id, D = wall.D;
+    if (id === 'cement') return;
+    const near = (list, r, n) => list.map((s) => [Math.min(Math.hypot(s.x + 0.05, s.y + 0.05), Math.hypot(s.x - 0.05, s.y + 0.05)), s])
+      .filter((a) => a[0] < r).sort(() => Math.random() - 0.5).slice(0, n).map((a) => a[1]);
+    const bit = (x, y, z, s, mat, flat = 0.55) => {
+      const m = new THREE.Mesh(this.meatGeos[Math.floor(Math.random() * 3)], mat);
+      m.position.set(x, y, z); m.rotation.set(rnd(0, 6), rnd(0, 6), rnd(0, 6));
+      m.scale.set(s * rnd(1.0, 1.4), s * rnd(0.7, 1.0), s * flat);
+      m.castShadow = true; m.receiveShadow = true;
+      return m;
+    };
+    if (id === 'nails' && wall.nails) for (const n of near(wall.nails, 0.13, 7)) this.oldGroup.add(bit(n.x + rnd(-0.002, 0.002), n.y + rnd(-0.002, 0.002), -D + rnd(0.024, 0.046), rnd(0.0045, 0.0075), this.driedMat));
+    if (id === 'spikes' && wall.spikes) {
+      for (const s of near(wall.spikes, 0.16, 3)) this.oldGroup.add(bit(s.x + rnd(-0.003, 0.003), s.y + rnd(-0.003, 0.003), -D + rnd(0.04, 0.19), rnd(0.004, 0.0075), this.driedMat));
+      this.oldGroup.add(bit(OLD_FIST_AT.x + rnd(-0.003, 0.003), OLD_FIST_AT.y - 0.006, -D + rnd(0.05, 0.07), 0.006, this.driedMat));
+    }
+    if (id === 'hotplate') for (let i = 0; i < 4; i++) this.oldGroup.add(bit(rnd(-0.1, 0.1), rnd(-0.14, 0.05), -D + 0.0015, rnd(0.003, 0.0055), this.charMat, 0.3));
+    if (id === 'slime' && wall.addFloater) for (let i = 0; i < 3; i++) { const m = bit(rnd(-0.12, 0.12), rnd(-0.16, 0.06), 0, rnd(0.004, 0.007), this.driedMat); m.castShadow = false; wall.addFloater(m); }
   }
   saveWall(id) {
     this.G.decals = this.G.decals || {}; this.G.stuck = this.G.stuck || {};

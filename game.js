@@ -10,9 +10,23 @@ import { UI } from './ui.js';
 import { SkillFX, SKILL_OF, SKILLS, skillKind } from './skills.js';
 
 const WALL_D = 0.62;                 // 카메라 → 벽 거리
-const FLESH_RATE = 1200;             // 살 손실 1.0 당 크레딧(벽 배율 전) — 한 판에 다음 벽 하나를 살 만큼
-const SCRAP_RATE = 3.6;              // 고철 HP 1 당 크레딧
-const DAMAGE_PACE = 0.65;            // 한 판에서 손·고철이 박살나는 속도
+const DAMAGE_PACE = 0.65;            // 한 판에서 손·고철이 박살나는 속도(벽마다 pace·space를 한 번 더 곱함)
+// 참을성: 맞아서 아픈 걸 견딘 만큼 쌓임(벽 배율을 곱함). 다친 양이 아니라 견딘 대수가 기준이라
+// 모아치기로 손을 한 번에 날리면 견딘 대수가 줄어 덜 쌓인다.
+const E_PUNCH = 3;                   // 맨손 한 대
+const E_SCRAP = 1;                   // 고철 한 대(쇠는 안 아프고 철사 박힌 이음새만 울림)
+const E_AUTO = 0.6;                  // 감전·잔상으로 저절로 나간 한 대
+// 모아치기: 한 방에 보통 주먹 수십 대만큼 손이 망가짐 — 그 대수의 65%만 견딘 것으로 침.
+// 터뜨리면 판은 빨리 끝나도 참을성은 덜 쌓여 고철을 더 갈아 끼우게 됨
+const CHARGE_KEEP = 0.65;
+const E_TUG = 1.5, E_RIP = 3;        // 박힌 손 버둥 한 번 / 뜯어냄(고철이면 1/3)
+const E_BLEED = 1.2;                 // 유리가 박혀 피가 새는 동안 초당
+const E_CORRODE = 0.4;               // 고철이 산에 삭는 동안 초당
+const TKD_GAP = 0.33, TKD_BONUS = 0.06;   // 세 대를 이 간격(실제 초) 안에 번갈아 치면 그 세 대의 6% 더
+// 지금 가장 높은 벽을 연 뒤로 이만큼 쌓이면 다음 벽이 열림(시멘트→자갈, 자갈→소주병 …). 보통 속도로 맨손 한 판 + 고철 한 판쯤.
+// 벽마다 보통 속도 맨손 한 판 참을성의 1.1배 — 운이 나빠 덜 쌓인 판이어도 고철 한 판이면 채워짐. 넘친 건 다음 벽으로 안 넘어감
+const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 13870, 40960];
+const HANDS_SPAN = 31040;            // 벽이 다 열린 뒤로는 이만큼 쌓일 때마다 새 손
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
 const BACK_T = 0.2;                  // 벽에서 튕겨 가드로 돌아오는 시간
@@ -73,10 +87,10 @@ const lightPool = [0, 1].map(() => { const l = new THREE.PointLight(0xffffff, 0,
 // ------------------------------------------------------------------ 상태
 const SAVE_KEY = 'cheolgwon.v1';
 const G = {
-  credits: 0, owned: ['cement'], wall: 'cement',
+  v: 2, endure: 0, openedAt: 0, owned: ['cement'], wall: 'cement',
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
-  decals: {}, stuck: {},
+  decals: {}, stuck: {}, old: {},
   seenHints: {}, seenSkill: {},
 };
 let assets, arms = {}, wall = null, fx, sfx, ui, skillFx = null;
@@ -101,9 +115,20 @@ function load() {
     if (!G.owned.includes('cement')) G.owned.unshift('cement');
     if (!valid.has(G.wall) || !G.owned.includes(G.wall)) G.wall = 'cement';
     if (!G.seenSkill || typeof G.seenSkill !== 'object') G.seenSkill = {};
+    if (!G.old || typeof G.old !== 'object') G.old = {};
     for (const bag of [G.decals, G.stuck]) if (bag && typeof bag === 'object') delete bag.traps;
     // 예전 버전의 벽 타격 흔적 저장값도 함께 폐기한다.
     delete G.wallDamage;
+    // 벽은 순서대로만 열림: 연 벽 중 가장 높은 벽까지가 열린 것
+    const top = Math.max(0, ...G.owned.map((id) => WALLS.findIndex((w) => w.id === id)));
+    G.owned = WALLS.slice(0, top + 1).map((w) => w.id);
+    // 크레딧 시절 저장: 연 벽은 그대로, 참을성은 지금 벽에서부터 쌓기 시작(손 상태·핏자국은 그대로)
+    if (s.v !== 2 || !(G.endure >= 0)) {
+      G.endure = 0; G.openedAt = 0;
+      delete G.credits;
+      G.v = 2;
+    }
+    if (!(G.openedAt >= 0) || G.openedAt > G.endure) G.openedAt = G.endure;
     return true;
   } catch (e) { return false; }
 }
@@ -476,17 +501,18 @@ class Fist {
   }
 }
 
-// ------------------------------------------------------------------ 태권도 판정
+// ------------------------------------------------------------------ 세 대 연타 판정
+// 실제 시간으로 잼(멈춤·슬로모션에 휘둘리지 않게)
 let chain = [];
 function registerPunch(fist, now) {
   if (fist.autoPunch) return;
-  chain.push({ side: fist.arm.side, t: now, credits: 0, fist });
+  chain.push({ side: fist.arm.side, t: rtime, units: 0, fist });
   if (chain.length > 3) chain.shift();
   fist.pendingChain = chain[chain.length - 1];
   if (chain.length === 3) {
     const [a, b, c] = chain;
     const alt = a.side !== b.side && b.side !== c.side;
-    const fast = (b.t - a.t) < 0.42 && (c.t - b.t) < 0.42;
+    const fast = (b.t - a.t) < TKD_GAP && (c.t - b.t) < TKD_GAP;
     if (alt && fast) {
       round.tkd++;
       const group = { links: chain.slice(), paid: false };
@@ -497,12 +523,12 @@ function registerPunch(fist, now) {
   }
 }
 
-// 세 대가 다 맞고 나면 그 세 대 크레딧의 절반을 더
+// 세 대가 다 맞고 나면 그 세 대 참을성의 6%를 더
 function payTkd(group) {
   if (group.paid || !group.links.every((l) => l.done)) return;
   group.paid = true;
-  let sum = 0; for (const l of group.links) sum += l.credits;
-  addCredits(Math.round(sum * 0.5), true);
+  let sum = 0; for (const l of group.links) sum += l.units;
+  addEndure(sum * TKD_BONUS, true);
 }
 
 // ------------------------------------------------------------------ 타격
@@ -521,13 +547,13 @@ function onImpact(fist, now) {
   // 벽 고유 반응 먼저 (걸림·경련 등)
   fx.lastContact = P.contact.clone();
   const react = wall.impact(fist, a, P.contact) || {};
-  // 피해량
+  // 피해량(벽마다 pace로 판 길이를 맞춤)
   const striker = hitter(a);
-  const base = W.dmg * DAMAGE_PACE * rnd(0.8, 1.2) * (react.dmgMul || 1);
+  const base = W.dmg * DAMAGE_PACE * W.pace * rnd(0.8, 1.2) * (react.dmgMul || 1);
   let left = base;
   if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) {
     // 모아치기는 벽의 종류와 무관하게 충격이 손으로 되돌아온다. 고철은 완충 약 세 번에 붕괴한다.
-    const sd = W.scrapDmg * DAMAGE_PACE * rnd(0.8, 1.25) * (react.dmgMul || 1) + CHARGE_SCRAP * chargeHit;
+    const sd = W.scrapDmg * DAMAGE_PACE * W.space * rnd(0.8, 1.25) * (react.dmgMul || 1) + CHARGE_SCRAP * chargeHit;
     a.damageScrap(sd, res);
     scrapBreakFx(a, res, P.contact);
     // 연결부 살도 다침(철사가 파고듦)
@@ -540,12 +566,16 @@ function onImpact(fist, now) {
     if (skill.id === 'twist' && chargeHit > 0.3 && a.I < 0.5 && !a.wristBroken) a.tWrist = Math.max(a.I + 0.012, a.tWrist - 0.08 * chargeHit);
     // 완충 세 번이면 건강한 주먹이 사라질 만큼 고정 자해량을 더한다. 벽에는 피해를 저장하지 않는다.
     // 모은 기술의 성격(화상·동상·감전…)이 내 손에 그대로 남는다.
-    a.damageFlesh(left + CHARGE_FLESH * chargeHit, chargeHit > 0.02 ? skillKind(W.kind, skill, chargeHit) : W.kind, res);
+    const kindNow = Object.assign(chargeHit > 0.02 ? skillKind(W.kind, skill, chargeHit) : Object.assign({}, W.kind), { pace: W.pace });
+    a.damageFlesh(left + CHARGE_FLESH * chargeHit, kindNow, res);
   }
-  // 크레딧
-  const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
-  if (fist.pendingChain) { const l = fist.pendingChain; l.credits = credits; l.done = true; fist.pendingChain = null; if (l.group) payTkd(l.group); }
-  addCredits(credits);
+  // 참을성: 견딘 한 대(맨손·그루터기는 아프고, 고철은 덜 아픔) + 뼈가 부러지는 등 큰 고통
+  const scrapHit = striker === 'scrap' || striker === 'pipe';
+  // 모아친 한 대는 보통 주먹 몇 대 몫만큼 망가뜨렸는지로 셈(그 몫의 CHARGE_KEEP만)
+  const equiv = chargeHit > 0 ? chargeHit * (scrapHit ? CHARGE_SCRAP / (W.scrapDmg * DAMAGE_PACE * W.space * 1.025) : CHARGE_FLESH / (W.dmg * DAMAGE_PACE * W.pace)) : 0;
+  const units = W.mult * ((scrapHit ? E_SCRAP : E_PUNCH) * (fist.autoPunch ? E_AUTO : 1) * (1 + CHARGE_KEEP * equiv) + eventEndure(res.ev));
+  if (fist.pendingChain) { const l = fist.pendingChain; l.units = units; l.done = true; fist.pendingChain = null; if (l.group) payTkd(l.group); }
+  addEndure(units);
   // 연출 — power: 피·살점 양, feel: 손맛(멈춤·화면 반동·떨림)
   const power = clamp(0.4 + res.flesh * 40 + res.ev.length * 0.3, 0.3, 1.6);
   const evW = eventWeight(res.ev);
@@ -599,11 +629,11 @@ function onImpact(fist, now) {
 
 // mfract: 손등뼈 골절(너클이 꺼짐), fract: 손가락뼈 골절, open: 뼈가 살을 뚫고 나옴, nail: 손톱이 깨짐
 // crush: 앞면이 더 짓이겨짐, finger: 손가락이 짓이겨져 뭉개짐, hand: 손목 위가 다 없어짐, stump: 팔뚝 끝이 짓이겨짐
-const EV_CREDITS = { mfract: 36, fract: 36, open: 45, nail: 24, finger: 60, wrist: 90, hand: 180, crush: 0, stump: 12, lumpGone: 24, pipeGone: 15 };
+const EV_ENDURE = { mfract: 9, fract: 7, open: 12, nail: 6, finger: 12, wrist: 18, hand: 30, crush: 0, stump: 1.5, lumpGone: 45, pipeGone: 10 };
 const EV_WEIGHT = { mfract: 0.42, fract: 0.3, open: 0.35, nail: 0.1, finger: 0.38, wrist: 0.45, hand: 0.7, crush: 0.05, stump: 0.08, lumpGone: 0.3, pipeGone: 0.2 };
-function eventCredits(evs) {
+function eventEndure(evs) {
   let c = 0;
-  for (const e of evs) c += EV_CREDITS[e.t] || 0;
+  for (const e of evs) c += EV_ENDURE[e.t] || 0;
   return c;
 }
 // 사건이 클수록 손맛을 키움
@@ -649,9 +679,9 @@ function onTug(fist, now) {
   fist.tug = 1;
   const res = { flesh: 0, scrap: 0, ev: [], point: null };
   const W = wall.def;
-  if (a.scrap && a.scrap.lumpHP > 0) { a.damageScrap(W.scrapDmg * 0.3 * DAMAGE_PACE, res); scrapBreakFx(a, res, fx.lastContact || poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.35 * DAMAGE_PACE, W.kind, res);
-  const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
-  addCredits(credits);
+  const scrapNow = !!(a.scrap && a.scrap.lumpHP > 0);
+  if (scrapNow) { a.damageScrap(W.scrapDmg * 0.3 * DAMAGE_PACE * W.space, res); scrapBreakFx(a, res, fx.lastContact || poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.35 * DAMAGE_PACE * W.pace, W.kind, res);
+  addEndure(W.mult * (E_TUG * (scrapNow ? 1 / 3 : 1) + eventEndure(res.ev)));
   wall.tug(fist, a);
   sfx.play('tear', 0.55 + Math.random() * 0.2);
   for (const e of res.ev) handleEvent(a, e, null);
@@ -672,9 +702,9 @@ function release(fist, now, auto) {
   const a = fist.arm;
   const res = { flesh: 0, scrap: 0, ev: [], point: null };
   const W = wall.def;
-  if (a.scrap && a.scrap.lumpHP > 0) { a.damageScrap(W.scrapDmg * 0.5 * DAMAGE_PACE, res); scrapBreakFx(a, res, poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.6 * DAMAGE_PACE, W.kind, res);
-  const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
-  addCredits(credits);
+  const scrapNow = !!(a.scrap && a.scrap.lumpHP > 0);
+  if (scrapNow) { a.damageScrap(W.scrapDmg * 0.5 * DAMAGE_PACE * W.space, res); scrapBreakFx(a, res, poses(a.side, a).contact); } else a.damageFlesh(W.dmg * 0.6 * DAMAGE_PACE * W.pace, W.kind, res);
+  addEndure(W.mult * (E_RIP * (scrapNow ? 1 / 3 : 1) + eventEndure(res.ev)));
   wall.release(fist, a, poses(a.side, a).contact);
   sfx.play('rip', 0.9);
   for (const e of res.ev) handleEvent(a, e, null);
@@ -688,11 +718,41 @@ function release(fist, now, auto) {
   checkRoundEnd();
 }
 
-// ------------------------------------------------------------------ 크레딧
-function addCredits(n, bonus) {
-  if (!n || n <= 0) return;
-  G.credits += n; round.earned += n; G.stats.total += n;
-  ui.credits(G.credits, n, bonus);
+// ------------------------------------------------------------------ 참을성
+function addEndure(n, bonus) {
+  if (!(n > 0) || !round) return;
+  G.endure += n; round.endured += n; G.stats.total += n;
+  const g = goal();
+  ui.endure(g, bonus);
+  // 판 도중에 다 차면 한 번만 알림. 다음 벽(또는 새 손)은 이 판이 끝날 때 열림
+  if (!round.full && G.endure >= g.to) { round.full = true; ui.goalFull(g); }
+}
+function nextWall() { return WALLS.find((w) => !G.owned.includes(w.id)) || null; }
+// 지금 채우는 막대: 가장 높은 벽을 연 뒤로 다음 벽까지, 벽이 다 열린 뒤로는 새 손까지
+function goal() {
+  const nw = nextWall();
+  const span = nw ? OPEN_SPAN[WALLS.indexOf(nw) - 1] : HANDS_SPAN;
+  return { kind: nw ? 'wall' : 'hands', wall: nw, from: G.openedAt, to: G.openedAt + span, endure: G.endure };
+}
+// 벽에 익숙해진 정도(0 갓 연 벽 ~ 1 넘어선 벽) — 칠수록 벽 앞에서 주먹이 덜 떨림. 새 손이 생기면 다시 떨림
+function familiarity(id) {
+  const i = WALLS.findIndex((w) => w.id === id);
+  const nw = nextWall();
+  const top = nw ? WALLS.indexOf(nw) - 1 : WALLS.length - 1;
+  if (i < top) return 1;
+  const g = goal();
+  return clamp((G.endure - g.from) / (g.to - g.from), 0, 1);
+}
+// 양손이 새로 생김(새 벽이 열릴 때·벽이 다 열린 뒤 참을성이 찰 때)
+function freshHands() {
+  for (const s of ['L', 'R']) {
+    const a = arms[s];
+    a.reset();
+    if (a.scrapObj) a.scrapObj.dispose();
+    a.scrapObj = null;
+    resetArmMotion(s);
+    G.arms[s] = { I: 0 };
+  }
 }
 
 // ------------------------------------------------------------------ 판
@@ -706,9 +766,12 @@ function resetArmMotion(side) {
   a.update(0, time);
 }
 
+function blankRound() {
+  return { punches: 0, endured: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false, endT: 0, full: false, opened: null, fresh: false };
+}
 function newRound() {
   cancelAllInputs();
-  round = { punches: 0, earned: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false, endT: 0 };
+  round = blankRound();
   chain = [];
   for (const s of ['L', 'R']) resetArmMotion(s);
   hitstop = 0; rush = 0; cam.trauma = 0;
@@ -744,6 +807,19 @@ function endRound() {
   G.stats.rounds++;
   // 팔 상태 저장
   for (const s of ['L', 'R']) G.arms[s] = armSnapshot(arms[s]);
+  // 참을성이 찼으면 다음 벽이 열리고 양손이 새로 생김. 벽이 다 열린 뒤로는 새 손만
+  const g = goal();
+  if (G.endure >= g.to) {
+    if (g.kind === 'wall') {
+      G.owned.push(g.wall.id);
+      setWall(g.wall.id);
+      round.opened = g.wall.id;
+    }
+    freshHands();
+    round.fresh = true;
+    G.openedAt = G.endure;   // 새 벽(새 손)부터 막대를 다시 채움
+    setTimeout(() => sfx.play('restore', 0.8), 380);
+  }
   save();
   ui.showShop(round);
 }
@@ -933,9 +1009,11 @@ function advance(rdt) {
 }
 
 function step(dt, rdt = dt) {
+  // 벽 앞에서 겁나 떨리는 정도: 처음 연 벽에선 크게, 참을성이 쌓일수록 무뎌짐
+  const fear = wall ? wall.def.fear * (1 - 0.7 * familiarity(wall.def.id)) : 0;
   for (const s of ['L', 'R']) {
     const f = fists[s], A = arms[s];
-    f.tremble = wall ? wall.def.fear : 0;
+    f.tremble = fear;
     if (mode === 'play') f.update(dt, time);
     f.feel(rdt);
     f.pose(_pos);
@@ -953,11 +1031,10 @@ function step(dt, rdt = dt) {
       if (so && so.corrode > 0 && a.scrap.lumpHP > 0) {
         so.corrode -= dt;
         const res = { flesh: 0, scrap: 0, ev: [], point: null };
-        a.damageScrap(dt * 9 * DAMAGE_PACE, res);
+        a.damageScrap(dt * 9 * DAMAGE_PACE * wall.def.space, res);
         const n = so.onDamage('lump', fx, wall, fx.lastContact || new THREE.Vector3());
         round.scrapParts += n;
-        a._corrAcc = (a._corrAcc || 0) + res.scrap * SCRAP_RATE * wall.def.mult;
-        if (a._corrAcc >= 1) { const k = Math.floor(a._corrAcc); a._corrAcc -= k; addCredits(k); }
+        addEndure(wall.def.mult * (E_CORRODE * dt + eventEndure(res.ev)));
         if (Math.random() < dt * 6) fx.bubbles(poses(s, a).contact, 2);
         if (res.ev.length) checkRoundEnd();
       }
@@ -969,10 +1046,8 @@ function step(dt, rdt = dt) {
       const a = arms[s];
       if (a.bleed > 0 && a.I < 0.5) {
         const res = { flesh: 0, scrap: 0, ev: [], point: null };
-        a.damageFlesh(a.bleed * dt * DAMAGE_PACE, wall.def.kind, res);
-        const c = res.flesh * FLESH_RATE * wall.def.mult + eventCredits(res.ev) * wall.def.mult;
-        a._bleedAcc = (a._bleedAcc || 0) + c;
-        if (a._bleedAcc >= 1) { const n = Math.floor(a._bleedAcc); a._bleedAcc -= n; addCredits(n); }
+        a.damageFlesh(a.bleed * dt * DAMAGE_PACE * wall.def.pace, wall.def.kind, res);
+        addEndure(wall.def.mult * (E_BLEED * dt + eventEndure(res.ev)));
         for (const e of res.ev) handleEvent(a, e, null);
         dropCrushed(a);
         if (res.ev.length) checkRoundEnd();
@@ -1041,7 +1116,7 @@ async function boot() {
   for (const s of ['L', 'R']) restoreArm(arms[s], G.arms[s]);
   warmup();
   ui = new UI({ G, WALLS, hadSave, actions });
-  round = { punches: 0, earned: 0, fract: 0, nail: 0, finger: 0, hand: 0, scrapGone: 0, scrapParts: 0, tkd: 0, ended: false };
+  round = blankRound();
   requestAnimationFrame(frame);
   ui.ready();
   document.body.classList.add('loaded');
@@ -1051,7 +1126,7 @@ async function boot() {
 function warmup() {
   const tmp = [];
   const add = (m) => { m.position.set(0, -0.2, -0.5); scene.add(m); tmp.push(m); };
-  for (const mat of [fx.meatMat, fx.fatMat, fx.boneMat, fx.skinBitMat, fx.nailMat, fx.dropMat, arms.L.shardMat, arms.R.shardMat, arms.L.pulpMat, arms.R.pulpMat, arms.L.flapMat, arms.R.flapMat]) add(new THREE.Mesh(fx.meatGeos[0], mat));
+  for (const mat of [fx.meatMat, fx.fatMat, fx.boneMat, fx.skinBitMat, fx.nailMat, fx.dropMat, fx.driedMat, fx.charMat, arms.L.shardMat, arms.R.shardMat, arms.L.pulpMat, arms.R.pulpMat, arms.L.flapMat, arms.R.flapMat]) add(new THREE.Mesh(fx.meatGeos[0], mat));
   // 속살·뼈는 살이 터지기 전엔 숨어 있음 → 처음 터질 때 멈칫하지 않게 미리 컴파일
   const hidden = [];
   for (const s of ['L', 'R']) for (const m of [arms[s].meat, arms[s].bone]) if (!m.visible) { m.visible = true; hidden.push(m); }
@@ -1081,13 +1156,13 @@ const actions = {
     if (!arms.L.hasFist() && !arms.R.hasFist()) {
       mode = 'shop';
       document.body.classList.remove('playing');
-      ui.hidePanels(); ui.showShop(round || { earned: 0 });
+      ui.hidePanels(); ui.showShop(round || blankRound());
       return false;
     }
     mode = 'play';
     document.body.classList.add('playing');
     newRound();
-    ui.credits(G.credits, 0);
+    ui.endure(goal());
     render();
     ui.hidePanels(); ui.hud(true);
     // 처음 치는 벽이면 이 벽의 모아치기를 한 줄로 알려 줌(처음 시작이면 조작 안내가 먼저)
@@ -1100,29 +1175,11 @@ const actions = {
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
     location.reload();
   },
-  buyWall(id) {
-    const d = WALLS.find((w) => w.id === id);
-    if (!d || G.owned.includes(id) || G.credits < d.price) return false;
-    // 벽은 순서대로만 — 건너뛰면 그 벽의 모아치기를 못 보고 지나가게 됨
-    if (nextWall() !== d) return false;
-    if (!arms.L.hasFist() && !arms.R.hasFist() && G.credits - d.price < Math.min(scrapPrice(arms.L), scrapPrice(arms.R))) return 'need';
-    G.credits -= d.price; G.owned.push(id); setWall(id); save();
-    sfx.play('buy', 0.8);
-    return true;
-  },
   selectWall(id) { if (G.owned.includes(id)) { setWall(id); save(); sfx.play('click', 0.5); } },
-  restore(side) {
-    const price = restorePrice();
-    if (G.credits < price) return false;
-    G.credits -= price; arms[side].reset(); arms[side].scrapObj && arms[side].scrapObj.dispose(); arms[side].scrapObj = null;
-    resetArmMotion(side);
-    G.arms[side] = { I: 0 }; save(); sfx.play('restore', 0.8); return true;
-  },
+  // 고철은 공짜 — 박살나면 또 갈아 끼움
   scrap(side) {
     const a = arms[side];
-    const price = scrapPrice(a);
-    if (G.credits < price || a.hasFist()) return false;
-    G.credits -= price;
+    if (a.hasFist()) return false;
     if (a.scrapObj) a.scrapObj.dispose();
     a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
     a.scrapObj = new Scrap(a, a.scrapSeed);
@@ -1132,32 +1189,19 @@ const actions = {
     save(); sfx.play('scrapOn', 0.9); return true;
   },
   canStart() { return arms.L.hasFist() || arms.R.hasFist(); },
-  restorePrice, scrapPrice: (s) => scrapPrice(arms[s]),
+  goal: () => goal(),
   nextWall: () => nextWall(),
   armInfo(s) { const a = arms[s]; return { flesh: a.I < 0.5, I: a.I, scrap: !!(a.scrap && a.scrap.lumpHP > 0), fist: a.hasFist(), crushed: a.crushZ < 0.095, broken: a.brokenK() > 0 }; },
   toggleSound(on) { sfx.setMuted(!on); G.muted = !on; save(); },
   isMuted() { return !!G.muted; },
 };
 
-function nextWall() { return WALLS.find((w) => !G.owned.includes(w.id)) || null; }
-// 손 회복은 늘 벽보다 비쌈: 다음에 살 벽 값의 1.2배(다 샀으면 가장 비싼 벽 기준)
-function restorePrice() {
-  const next = WALLS.find((w) => !G.owned.includes(w.id));
-  const top = Math.max(0, ...WALLS.filter((w) => G.owned.includes(w.id)).map((w) => w.price));
-  const base = Math.max(top, next ? next.price : 0);
-  return Math.round(Math.max(450, base * 1.2) / 10) * 10;
-}
-function scrapPrice(a) {
-  const lost = clamp((a.I - 0.5) / 0.5, 0, 1);
-  return Math.round(35 + lost * 45);
-}
-
 // 디버그(자동 테스트용)
 function tick(dt, n = 1, draw = true) {
   for (let i = 0; i < n; i++) advance(dt);
   if (draw) render();
 }
-window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; }, get skillFx() { return skillFx; }, get time() { return time; } };
+window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addEndure, goal, familiarity, freshHands, OPEN_SPAN, HANDS_SPAN, poses, camera, scene, renderer, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; }, get skillFx() { return skillFx; }, get time() { return time; } };
 
 boot().catch((e) => { console.error(e); const el = $('#err'); if (el) { el.textContent = '불러오기 실패: ' + e.message; el.style.display = 'block'; } });
 

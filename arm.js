@@ -1228,7 +1228,8 @@ export class Arm {
       // 반복 지점 누적
       let sp = this.spots.find((s) => s.p.distanceTo(hit.p) < 0.009);
       if (!sp) { sp = { p: hit.p.clone(), s: 0 }; this.spots.push(sp); }
-      sp.s += (I - prev) * 9 + 0.06;
+      // 한 대마다 쌓이는 몫은 벽의 pace에 맞춤(판이 길어져도 살이 터지는 빠르기는 손이 망가지는 정도를 따라감)
+      sp.s += (I - prev) * 9 + 0.06 * (kind.pace ?? 1);
       const s = sp.s;
       // 기본 둔상 진행: 멍 → 까짐 → 열린 상처 → 뼈 노출
       const rr = rnd(0.0065, 0.0105);
