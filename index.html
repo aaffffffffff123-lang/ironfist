@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#efece6">
+<meta name="theme-color" content="#202429">
 <title>鉄拳</title>
 <meta property="og:type" content="website">
 <meta property="og:title" content="鉄拳">
@@ -14,8 +14,10 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" type="image/png" href="favicon.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=forge1">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon.png?v=forge1">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=forge1">
+<link rel="preload" as="image" href="title-logo.webp?v=forge1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+JP:wght@900&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -162,6 +164,7 @@ body.playing #sound{display:none}
 @media (max-width:560px){#wallName{top:calc(56px + env(safe-area-inset-top))}}
 @media (max-width:380px){.shopBody{padding:16px 12px}.next{padding-left:12px;padding-right:12px}.arm{padding:10px 7px}.wall .sw{display:none}#endureBox .bar{width:78px}}
 </style>
+<link rel="stylesheet" href="forge-ui.css?v=1">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -183,7 +186,7 @@ body.playing #sound{display:none}
 </button>
 
 <section id="title" aria-hidden="true" inert>
-  <h1 class="logo"><span>鉄拳</span></h1>
+  <h1 class="logo"><img src="title-logo.webp?v=forge1" alt="鉄拳" width="1400" height="700" draggable="false" fetchpriority="high"></h1>
   <div class="tbtns">
     <button class="btn" id="btnStart">시작</button>
     <button class="btn ghost" id="btnNew">처음부터</button>
@@ -225,4 +228,5 @@ body.playing #sound{display:none}
 <script type="module" src="./game.js?v=10"></script>
 </body>
 </html>
+
 

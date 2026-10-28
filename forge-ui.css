@@ -1,0 +1,293 @@
+/* 鉄拳 — forged steel skin. Visuals only; game state and panel flow stay in ui.js. */
+:root {
+  --forge-text: #f1f2f3;
+  --forge-muted: #b7bec5;
+  --forge-edge: #565d64;
+  --forge-hot: #ff9a45;
+  --forge-panel: #202429;
+}
+
+/* Keep the room light; the title and metal controls sit in front of it. */
+#title {
+  padding-top: calc(10vh + env(safe-area-inset-top));
+}
+.logo {
+  display: block;
+  flex: 0 0 auto;
+  width: min(88vw, 510px);
+  margin: 0;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+  letter-spacing: 0;
+  filter: drop-shadow(0 7px 6px rgba(37, 26, 17, .16));
+}
+.logo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 36vh;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.logo::after { content: none; }
+.tbtns {
+  margin-top: clamp(18px, 4vh, 32px);
+  gap: 12px;
+}
+.tbtns > .btn { min-width: 174px; }
+
+/* Wide, quiet steel faces; heat belongs to the edges and primary actions. */
+.btn {
+  border: 1px solid #7a828b;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #f2f3f3 0%, #c8cdd2 47%, #a1a9b1 48%, #c4cad0 100%);
+  color: #181c20;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -1px 0 rgba(37, 42, 47, .45), 0 3px 0 #41474e, 0 6px 12px rgba(0, 0, 0, .18);
+  transition: filter .15s ease, transform .12s ease, box-shadow .12s ease;
+  touch-action: manipulation;
+}
+#btnStart, #btnNext {
+  border-bottom-color: #ed7b28;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -2px 0 #ff9a45, 0 3px 0 #4a3020, 0 6px 14px rgba(0, 0, 0, .2);
+}
+.btn:not(:disabled):active {
+  transform: translateY(2px);
+  filter: brightness(.94);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .18), 0 1px 0 #41474e;
+}
+.btn.ghost {
+  border: 1px solid #646c74;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #424951, #282d33);
+  color: #f0f1f2;
+  text-shadow: 0 1px 1px #101316;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 2px 0 #171b1e, 0 3px 7px rgba(0, 0, 0, .15);
+}
+.btn:disabled, #btnNext:disabled, .btn.sub:disabled {
+  opacity: 1;
+  border-color: #444b53;
+  background: linear-gradient(180deg, #353b42, #292e34);
+  color: #929ba5;
+  text-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  transform: none;
+  filter: none;
+}
+.btn:focus-visible, .wall:focus-visible, .wallPicker summary:focus-visible, #sound:focus-visible, #arcadeFace:focus-visible {
+  outline: 3px solid #ffad63;
+  outline-offset: 4px;
+}
+#ctrlHint {
+  padding: 0 20px;
+  color: #282a2c;
+  line-height: 1.6;
+  opacity: .9;
+  text-shadow: 0 1px 3px #f3f0e9, 0 0 8px #f3f0e9;
+}
+
+/* A dark forged-steel case, with a restrained machined rim. */
+#shop {
+  background: rgba(19, 21, 24, .44);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.sheet {
+  position: relative;
+  color: var(--forge-text);
+  border: 1px solid #747b82;
+  border-radius: 13px;
+  background: linear-gradient(128deg, rgba(255, 255, 255, .035), transparent 40%), linear-gradient(180deg, #2c3137, #1c2025 68%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 0 0 3px rgba(10, 13, 16, .46), 0 16px 48px rgba(0, 0, 0, .4);
+}
+.sheet::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 18px;
+  left: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #aeb8c1 20%, #f2f3f3 46%, #d6945a 72%, transparent);
+  pointer-events: none;
+}
+.shopBody {
+  scrollbar-width: thin;
+  scrollbar-color: #707982 #202429;
+}
+.shopBody::-webkit-scrollbar { width: 5px; }
+.shopBody::-webkit-scrollbar-thumb { background: #707982; border-radius: 5px; }
+.shopBody::-webkit-scrollbar-track { background: #202429; }
+.res h2 { color: var(--forge-muted); }
+#rEarned {
+  color: #ffac65;
+  text-shadow: 0 1px 0 #542d12;
+}
+.opened {
+  border: 1px solid #8c6443;
+  border-radius: 7px;
+  background: linear-gradient(115deg, rgba(166, 83, 24, .22), rgba(37, 40, 43, .65));
+  box-shadow: inset 2px 0 0 #f38c3b, inset 0 1px 0 rgba(255, 207, 158, .08);
+}
+.opened .sw, .wall .sw {
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2), 0 1px 3px rgba(0, 0, 0, .3);
+}
+.opened .ot span { color: #ffb777; }
+.opened .ot b { color: #faf6f0; }
+.opened .ot small { color: #c7bdb4; line-height: 1.5; }
+.goal {
+  border-color: #464d55;
+}
+.goalHead span { color: var(--forge-muted); }
+.goalHead b { color: var(--forge-text); }
+.goalHead em { color: #ffad69; }
+.goalBar, #endureBox .bar {
+  border: 1px solid #4e565f;
+  border-radius: 3px;
+  background: #10151a;
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .45), 0 1px 0 rgba(255, 255, 255, .06);
+}
+#goalFill, #endureFill {
+  border-radius: 2px;
+  background: linear-gradient(180deg, #ffbc75, #e5782f 45%, #c34717);
+  box-shadow: inset 0 1px 0 rgba(255, 235, 202, .5);
+}
+.goal.full #goalFill, #endureBox.full #endureFill {
+  background: linear-gradient(180deg, #ffe0a4, #ffab43 48%, #f26b21);
+}
+.sec h3 { color: #f0f1f2; font-size: 16px; }
+.arm {
+  border: 1px solid #505861;
+  border-radius: 8px;
+  background: linear-gradient(140deg, #30363d, #24292f 65%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 4px rgba(0, 0, 0, .1);
+}
+.armHead b { color: #f2f3f4; }
+.armState { color: #bac2ca; }
+.arm.ready {
+  border-color: #8d7159;
+  background: linear-gradient(140deg, #383a3c, #282b2e 65%);
+}
+.arm.ready .armState { color: #ffd0a5; }
+.btn.sub {
+  border: 1px solid #bc844f;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #ffd1a0, #eeab6d 47%, #d58b4e 48%, #edac72);
+  color: #2c1b10;
+  text-shadow: 0 1px 0 rgba(255, 240, 215, .45);
+  box-shadow: inset 0 1px 0 rgba(255, 246, 224, .7), 0 2px 0 #644222;
+}
+.btn.sub:not(:disabled):active {
+  background: linear-gradient(180deg, #e9af77, #cf8a50);
+}
+.armReady {
+  border: 1px solid #605c56;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #333538, #292c30);
+  color: #ffd6b2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.wallPicker { border-color: #464d55; }
+.wallPicker summary {
+  min-height: 44px;
+  border-radius: 4px;
+}
+.wallPicker summary b { color: #f0f2f4; }
+.wallPicker summary small, .wallPicker summary::after { color: #b9c1c9; }
+.wall {
+  border: 1px solid #4e5660;
+  border-radius: 7px;
+  background: linear-gradient(130deg, #2f353c, #252a31);
+  color: #f0f2f4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.wall.cur {
+  border-color: #d19562;
+  background: linear-gradient(110deg, #40362f, #292d32 75%);
+  box-shadow: inset 2px 0 0 #f9a056, inset 0 1px 0 rgba(255, 203, 155, .1);
+}
+.wall .wt small { color: #bcc3ca; }
+.wall .wt .sk { color: #ffc08a; }
+.wall .wp i { color: #ffd1aa; }
+.wall .wp i.o { color: #e5e9ed; }
+.wall .wp small { color: #b1bac3; }
+.wall .wp em {
+  border: 1px solid #6b727a;
+  border-radius: 4px;
+  background: #404750;
+  color: #d1d7dd;
+}
+.wall.locked {
+  opacity: 1;
+  border-color: #3d444b;
+  background: #24292f;
+  color: #aab2bb;
+  box-shadow: none;
+}
+.wall.locked .wt .sk { color: #b9a18b; }
+.wall.locked .wt small, .wall.locked .wp small { color: #9da7b1; }
+.wall.locked .sw { filter: saturate(.5) brightness(.72); }
+.wall.locked .wp em {
+  border-color: #4c545d;
+  background: #30373f;
+  color: #adb7c1;
+}
+.next {
+  border-top: 1px solid #565d65;
+  background: linear-gradient(180deg, #30363c, #20252a);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+}
+#nextNote { color: #c1c8cf; }
+
+/* Small in-game instruments share the steel, without covering the room. */
+#sound {
+  border: 1px solid #777f87;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #e3e7ea, #a8b0b8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 2px 4px rgba(0, 0, 0, .2);
+}
+#endureBox {
+  border: 1px solid #737b84;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(54, 61, 69, .97), rgba(29, 34, 40, .97));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15), 0 2px 6px rgba(0, 0, 0, .22);
+}
+#endureBox .lbl { color: #f1f3f5; }
+#wallName { color: #26292d; opacity: .85; text-shadow: 0 0 5px #fff, 0 1px 2px #fff; }
+#hint {
+  border: 1px solid #717b85;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(49, 56, 64, .96), rgba(27, 32, 38, .96));
+  color: #f3f4f5;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 3px 12px rgba(0, 0, 0, .2);
+  line-height: 1.5;
+}
+#boot .bar { height: 5px; border-radius: 2px; background: #b5b6b4; }
+#boot .bar i { background: linear-gradient(90deg, #c86426, #ffb872); }
+#err { border-color: #b7754a; border-radius: 7px; background: #282c31; color: #ffc096; }
+
+@media (hover: hover) {
+  .btn:not(:disabled):hover { filter: brightness(1.08); }
+  .wall:not(:disabled):hover { border-color: #b5bdc5; background: linear-gradient(130deg, #3b434c, #2b323a); }
+  .wallPicker summary:hover { background: rgba(255, 255, 255, .035); }
+}
+@media (max-width: 380px) {
+  .tbtns { margin-top: 20px; }
+  .btn.sub { padding-right: 4px; padding-left: 4px; }
+}
+@media (max-height: 500px) {
+  #title { padding-top: calc(42px + env(safe-area-inset-top)); }
+  .logo { width: min(72vw, 390px); }
+  .logo img { max-height: 36vh; }
+  .tbtns { flex-direction: row; gap: 12px; margin-top: 16px; }
+  .tbtns > .btn { min-width: 136px; padding: 11px 24px; font-size: 16px; }
+  .tbtns > .btn.ghost { padding: 11px 20px; font-size: 14px; }
+  #ctrlHint { bottom: calc(10px + env(safe-area-inset-bottom)); font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, #title, #hud, #shop, .sheet, #hint, #endureFill, #goalFill { transition: none; }
+  #boot .bar i, #endureBox.full #endureFill, #endureBox.flash, #sArms.shake { animation: none; }
+}
