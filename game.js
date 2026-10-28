@@ -193,6 +193,7 @@ class Spring {
 }
 const cam = {
   trauma: 0,                                         // 흔들림(0~1, 실제 시간으로 잦아듦)
+  charge: 0, chargeSide: 0,                         // 충전 중 내 몸 떨림(카메라만, 장면·벽은 안 움직임)
   pitch: new Spring(8, 0.42), yaw: new Spring(7, 0.45), roll: new Spring(7.5, 0.42),
   push: new Spring(9, 0.5), fov: new Spring(8, 0.5),
   ph: Array.from({ length: 6 }, () => Math.random() * 100),
@@ -470,11 +471,18 @@ class Fist {
       out.position.y -= charge * 0.007 * launchFade;
       tmpQ.setFromAxisAngle(AX_X, -(0.05 * prep + 0.13 * charge) * launchFade); out.quaternion.multiply(tmpQ);
       const sk = skillFx ? skillFx.skill.id : 'shock';
-      // 잔상 연타·대폭발은 모을수록 주먹이 더 심하게 떨림
-      const tremK = sk === 'barrage' ? 3.2 : sk === 'final' ? 2.6 : 1;
-      const trem = launching ? 0 : prep * 0.00025 + charge * 0.00125 * tremK;
+      // 힘을 억지로 붙들고 있는 느낌: 완충에 가까울수록 팔 전체와 손목이 함께 떨린다.
+      // 발사 중에는 곧게 뻗는 선이 흐려지지 않게 즉시 끈다.
+      const tremK = sk === 'barrage' ? 2.7 : sk === 'final' ? 2.4 : sk === 'sonic' ? 1.8 : 1.4;
+      const trem = launching ? 0 : prep * 0.0004 + charge * charge * 0.0021 * tremK;
       out.position.x += Math.sin(rtime * (sk === 'barrage' ? 97 : 53) + (sg < 0 ? 0 : 2.1)) * trem;
       out.position.y += Math.sin(rtime * (sk === 'barrage' ? 89 : 47) + 0.8) * trem * 0.7;
+      out.position.z += Math.sin(rtime * 71 + (sg < 0 ? 1.4 : 3.5)) * trem * 0.55;
+      if (!launching && charge > 0.02) {
+        const wrist = charge * charge * 0.009 * tremK;
+        tmpQ.setFromAxisAngle(AX_X, Math.sin(rtime * 61 + 0.5) * wrist); out.quaternion.multiply(tmpQ);
+        tmpQ.setFromAxisAngle(AX_Z, Math.sin(rtime * 73 + (sg < 0 ? 0 : 1.7)) * wrist * 0.65); out.quaternion.multiply(tmpQ);
+      }
       // 회오리: 모으는 동안 팔을 반대로 감았다가, 내지를 때 한 바퀴 비틀며 나감
       if (sk === 'twist') {
         const W = 1.15;
@@ -774,7 +782,7 @@ function newRound() {
   round = blankRound();
   chain = [];
   for (const s of ['L', 'R']) resetArmMotion(s);
-  hitstop = 0; rush = 0; cam.trauma = 0;
+  hitstop = 0; rush = 0; cam.trauma = 0; cam.charge = 0; cam.chargeSide = 0;
   for (const s of CAM_SPRINGS) s.reset();
   skillFx?.clear();
 }
@@ -1057,13 +1065,20 @@ function step(dt, rdt = dt) {
   if (wall) wall.update(dt, time, arms, fists);
   fx.update(dt, time, rdt);
   if (skillFx) {
+    let chargeCam = 0, chargeSide = 0;
     for (const s of ['L', 'R']) {
       const f = fists[s];
       let k = 0;
       const holding = mode === 'play' && f.inputHeld && f.chargeStart >= 0 && f.state === 'idle' && now() >= f.flinchUntil;
       if (holding) k = smooth(clamp((realSeconds() - f.chargeStart - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1));
       skillFx.setCharge(s, k, holding);
+      chargeCam = Math.max(chargeCam, k);
+      chargeSide += (s === 'L' ? -1 : 1) * k;
     }
+    // 양손을 동시에 모아도 진폭은 합산하지 않는다. 방향만 서로 상쇄되어 멀미를 막는다.
+    const chargeFollow = chargeCam > cam.charge ? 8 : 15;
+    cam.charge += (chargeCam - cam.charge) * Math.min(1, rdt * chargeFollow);
+    cam.chargeSide += (clamp(chargeSide, -1, 1) - cam.chargeSide) * Math.min(1, rdt * 12);
     skillFx.update(dt, rdt, time);
     // 중력이 터지거나 대폭발이 날 때 화면이 크게 밀림
     if (skillFx.camPunch) { const n = skillFx.camPunch; skillFx.camPunch = 0; cam.trauma = Math.min(1, cam.trauma + 0.5 * n); cam.push.kick(-0.012 * n); cam.fov.kick(-4 * n); cam.pitch.kick(-1.2 * n * D2R); }
@@ -1080,10 +1095,15 @@ function render() {
   // 반동(스프링) + 흔들림(trauma) — 카메라 자기 축 기준
   const a = Math.pow(cam.trauma, 1.5), t = rtime, P = cam.ph;
   const nz = (i, f1, f2) => Math.sin(t * f1 + P[i]) * 0.62 + Math.sin(t * f2 + P[i + 3]) * 0.38;
-  camera.translateZ(cam.push.x);
-  camera.rotateX(cam.pitch.x + a * 1.0 * D2R * nz(0, 107, 163));
-  camera.rotateY(cam.yaw.x + a * 0.75 * D2R * nz(1, 97, 151));
-  camera.rotateZ(cam.roll.x + a * 1.4 * D2R * nz(2, 113, 173));
+  // 충전 떨림은 장면을 흔들지 않고 카메라 자기 축만 움직인다. 그래서 벽의 지진이 아니라
+  // 힘을 붙들고 있는 내 머리·몸이 떠는 시점으로 읽힌다. 후반에 급격히 강해진다.
+  const ck = Math.pow(smooth(cam.charge), 1.55), cs = cam.chargeSide;
+  camera.translateX(ck * (0.00065 * nz(1, 59, 83) + cs * 0.00018 * nz(2, 43, 71)));
+  camera.translateY(ck * 0.00072 * nz(0, 53, 79));
+  camera.translateZ(cam.push.x + ck * 0.00082 * nz(2, 47, 73));
+  camera.rotateX(cam.pitch.x + a * 1.0 * D2R * nz(0, 107, 163) + ck * 0.48 * D2R * nz(0, 47, 79));
+  camera.rotateY(cam.yaw.x + a * 0.75 * D2R * nz(1, 97, 151) + ck * (0.36 * nz(1, 53, 83) + cs * 0.08) * D2R);
+  camera.rotateZ(cam.roll.x + a * 1.4 * D2R * nz(2, 113, 173) + ck * (0.72 * nz(2, 61, 89) + cs * 0.12) * D2R);
   const fov = baseFov + cam.fov.x - (skillFx ? skillFx.zoom * 7 : 0);
   if (Math.abs(fov - camera.fov) > 1e-4) { camera.fov = fov; camera.updateProjectionMatrix(); }
   // 입자 크기: 화면 높이(픽셀)와 시야각에 맞춤 — 세로 폰 화면(배율 2)에서 예전과 같은 크기

@@ -821,7 +821,7 @@ export class SkillFX {
     if (S.charging && holding && k >= 0.999 && !S.full) {
       S.full = true;
       S.att.pulse = 1;
-      this.sfx.play('ready', 0.55, { pan: side === 'L' ? -0.3 : 0.3, jitter: 0.03 });
+      this.sfx.play('ready', 0.76, { pan: side === 'L' ? -0.3 : 0.3, jitter: 0.025, verbAmt: 0.42 });
       try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) {}
     }
     if (S.charging && !holding && !S.striking) this.chargeCancel(side);
@@ -841,7 +841,7 @@ export class SkillFX {
     const pan = side === 'L' ? -0.3 : 0.3;
     const full = k >= 0.95;
     switch (id) {
-      case 'sonic': this.sfx.play('lSonic', 0.75 + 0.25 * k, { pan, jitter: 0.04 }); this.coneOwner = side; break;
+      case 'sonic': this.sfx.play('lSonic', 0.35 + 0.98 * k, { pan, jitter: 0.018, verb: false, dry: true }); this.coneOwner = side; break;
       case 'barrage': this.sfx.play('flurry', 0.8, { pan, jitter: 0.05 }); break;
       case 'twist': this.sfx.play('lTwist', 0.8, { pan, jitter: 0.04 }); break;
       case 'fire': this.sfx.play('lFire', 0.75, { pan, jitter: 0.05 }); break;
@@ -923,7 +923,7 @@ export class SkillFX {
     this._speedLines(p, 40, k);
     this._dustRing(p, 34, k, [0.66, 0.62, 0.56], 0.7, 2.0, 0.12);
     if (this.coneOwner === side) { this.coneOwner = null; this.coneBurst = { t: 0, p: F.clone(), dir: this._fwd(side), k }; }
-    this.sfx.play('iSonic', 0.85 + 0.2 * k, { pan, jitter: 0.04, verbAmt: 0.6 });
+    this.sfx.play('iSonic', 0.98 + 0.24 * k, { pan, jitter: 0.035, verbAmt: 0.68 });
   }
   _iBarrage(side, p, k, pan) {
     this._flashLight(V().set(p.x, p.y + 0.02, p.z + 0.1), 0xeef3ff, 4 * k, 0.1);

@@ -211,6 +211,24 @@ function design(S) {
     S.add(o, S.mul(room, S.envExp(room.length, 0.004, 0.13)), 0, 0.19);
     return S.filt(S.sat(o, 1.25), 'lp', 1500, 0.7);
   }, 3);
+  put('powerAir', () => {
+    const o = S.buf(0.34);
+    // 주먹 앞 공기가 한꺼번에 접혔다 펴지는 짧은 압력파. 저음 위에 이 앞머리가 있어야
+    // 작은 폰 스피커에서도 모아치기가 일반 타격과 즉시 구분된다.
+    const nWave = (at, g, ms) => {
+      const n = Math.max(8, Math.floor(ms * 0.001 * S.sr)), off = Math.floor(at * S.sr);
+      for (let i = 0; i < n && off + i < o.length; i++) o[off + i] += (1 - 2 * i / (n - 1)) * g;
+    };
+    nWave(0, 1.0, 2.1);
+    nWave(0.047, 0.34, 1.8); // 방에서 한 번 튕겨 돌아오는 짧은 slap
+    const snap = S.filt(S.noise(Math.floor(0.018 * S.sr)), 'hp', 2600, 0.65);
+    S.add(o, S.mul(snap, S.envExp(snap.length, 0.00004, 0.0018)), 0, 1.0);
+    const air = S.filt(S.noise(Math.floor(0.065 * S.sr)), 'bp', rnd(1800, 2600), 0.8);
+    S.add(o, S.mul(air, S.envExp(air.length, 0.00015, 0.010)), 0.001, 0.58);
+    const echo = S.filt(S.noise(Math.floor(0.016 * S.sr)), 'hp', 2200, 0.7);
+    S.add(o, S.mul(echo, S.envExp(echo.length, 0.00005, 0.0025)), 0.047, 0.31);
+    return S.filt(S.sat(o, 1.65), 'hp', 160, 0.7);
+  }, 4);
   put('powerMetal', () => {
     const o = S.buf(0.46);
     // 철권은 밝은 한 번의 파열음 뒤에 낮은 금속 공명만 남긴다.
@@ -463,17 +481,30 @@ function design(S) {
     S.add(o, n, 0, 1);
     return o;
   }, 2);
-  // 음속 돌파: 내지를 때 채찍 같은 '딱'(N파) + 맞을 때 낮은 폭음
+  // 음속 돌파: 손을 놓는 순간 채찍 같은 공기 파열, 맞는 순간에는 별도의 낮은 폭음.
+  // 둘을 한 소리로 뭉치지 않아 '음속 돌파 → 벽 접촉'의 짧은 간격이 귀로도 읽힌다.
   put('lSonic', () => {
-    const o = S.buf(0.4), n = Math.floor(0.0026 * S.sr);
-    for (let i = 0; i < n * 2; i++) { const t = i / (n * 2); o[i] += (1 - 2 * t); }
-    for (let i = 0; i < n * 2; i++) { const t = i / (n * 2), j = i + Math.floor(0.046 * S.sr); if (j < o.length) o[j] += (1 - 2 * t) * 0.22; }
-    const hiss = S.filt(S.noise(Math.floor(0.06 * S.sr)), 'hp', 2500, 0.7);
-    S.add(o, S.mul(hiss, S.envExp(hiss.length, 0.0002, 0.012)), 0.001, 0.6);
-    const body = S.filt(S.noise(Math.floor(0.12 * S.sr)), 'bp', 900, 0.8);
-    S.add(o, S.mul(body, S.envExp(body.length, 0.0005, 0.03)), 0, 0.35);
-    return S.sat(o, 1.6);
-  }, 3);
+    const o = S.buf(0.46);
+    const nWave = (at, g, ms) => {
+      const n = Math.max(8, Math.floor(ms * 0.001 * S.sr)), off = Math.floor(at * S.sr);
+      for (let i = 0; i < n && off + i < o.length; i++) o[off + i] += (1 - 2 * i / (n - 1)) * g;
+    };
+    // 첫 파열, 채찍 끝의 보조 파열, 벽에서 되돌아오는 작은 반사음.
+    nWave(0, 1.35, 1.75);
+    nWave(0.017, 0.52, 1.25);
+    nWave(0.044, 0.42, 2.0);
+    const crack = S.filt(S.noise(Math.floor(0.014 * S.sr)), 'hp', 2850, 0.6);
+    S.add(o, S.mul(crack, S.envExp(crack.length, 0.00002, 0.0013)), 0, 1.2);
+    const lash = S.filt(S.noise(Math.floor(0.035 * S.sr)), 'bp', rnd(2500, 3900), 0.85);
+    S.add(o, S.mul(lash, S.envExp(lash.length, 0.00006, 0.0045)), 0.0006, 0.8);
+    const hiss = S.filt(S.noise(Math.floor(0.07 * S.sr)), 'hp', 2400, 0.7);
+    S.add(o, S.mul(hiss, S.envExp(hiss.length, 0.00015, 0.013)), 0.0015, 0.72);
+    const body = S.filt(S.noise(Math.floor(0.13 * S.sr)), 'bp', rnd(720, 980), 0.78);
+    S.add(o, S.mul(body, S.envExp(body.length, 0.00035, 0.028)), 0, 0.46);
+    const refl = S.filt(S.noise(Math.floor(0.018 * S.sr)), 'hp', 2600, 0.65);
+    S.add(o, S.mul(refl, S.envExp(refl.length, 0.00003, 0.0022)), 0.044, 0.42);
+    return S.filt(S.sat(o, 1.8), 'hp', 95, 0.7);
+  }, 4);
   put('iSonic', () => {
     const o = S.buf(0.9);
     S.add(o, S.sat(S.sweep(0.8, 120, 36, 0.05, 0.22), 2.6), 0, 1);
@@ -848,15 +879,20 @@ export class SFX {
     const k = (0.16 + Math.pow(q, 0.68) * 0.84) * stackK;
     const pan = side === 'L' ? -0.16 : 0.16;
 
-    this.play('powerCore', 0.78 * k, {
+    // 고역 공기 파열 → 접촉 질량 → 42ms 뒤 방 울림. 단순히 전체 볼륨만 키우지 않고
+    // 서로 다른 시간·대역으로 벌려서 모아치기 한 번이 크게 펼쳐지게 한다.
+    this.play('powerAir', 0.8 * k * (0.55 + 0.45 * q), {
+      pan: pan * 1.65, rate: scrap ? 0.94 : 1.02, jitter: 0.025, verbAmt: 0.22,
+    });
+    this.play('powerCore', 0.84 * k, {
       pan, rate: scrap ? 0.92 : 0.98, jitter: 0.035, verbAmt: 0.18,
     });
     // 시각 압력파와 맞물리는 42ms 뒤의 두 번째 폭음. 저역은 중앙에 가깝게 둔다.
-    this.play('powerRoom', 0.66 * k, {
+    this.play('powerRoom', 0.74 * k, {
       delay: 0.042, pan: pan * 0.25, rate: 0.96, jitter: 0.025, verbAmt: 0.42,
     });
     if (scrap) {
-      this.play('powerMetal', 0.44 * k, {
+      this.play('powerMetal', 0.48 * k, {
         delay: 0.007, pan: pan * 1.65, rate: 0.94, jitter: 0.045, verbAmt: 0.38,
       });
     }
