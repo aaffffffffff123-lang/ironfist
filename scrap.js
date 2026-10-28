@@ -209,7 +209,13 @@ export class Scrap {
     this.state = { lumpHP: 140, pipeHP, partsLeft: this.parts.length };
     this.totalLump = 140;
     this.heat = 0; this.corrode = 0;
-    this.glow = new THREE.Mesh(new THREE.SphereGeometry(0.043, 18, 12), new THREE.MeshBasicMaterial({ color: 0xff4a10, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    // 달아오른 쇳덩이 빛 — 가장자리로 갈수록 흐려지는 공(납작한 원판처럼 안 보이게)
+    this.glow = new THREE.Mesh(new THREE.SphereGeometry(0.043, 18, 12), new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { opacity: { value: 0 } }, toneMapped: false,
+      vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+      fragmentShader: 'uniform float opacity; varying vec3 vN; varying vec3 vV; void main(){ float c = pow(clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0), 2.2); gl_FragColor = vec4(vec3(1.0, 0.29, 0.06) * c * opacity * 1.6, 1.0); }',
+    }));
     this.glow.scale.set(0.95, 0.8, 1.05); lump.add(this.glow);
   }
   // 맞을 때 부품이 떨어져 나감. 떨어진 개수 반환
@@ -256,7 +262,7 @@ export class Scrap {
   update(dt, time) {
     if (this.lump) this.lump.rotation.z = Math.sin(time * 13) * 0.004;
     this.heat = Math.max(0, this.heat - dt * 0.12);
-    this.glow.material.opacity = Math.min(0.55, this.heat * 0.6) * (0.85 + Math.sin(time * 9) * 0.15);
+    this.glow.material.uniforms.opacity.value = Math.min(0.55, this.heat * 0.6) * (0.85 + Math.sin(time * 9) * 0.15);
     this.glow.visible = this.heat > 0.01 && this.state.lumpHP > 0;
   }
   dispose() { this.group.parent && this.group.parent.remove(this.group); }

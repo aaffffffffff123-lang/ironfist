@@ -478,7 +478,7 @@ function makeSkinMaterial(U) {
     Object.assign(shader.uniforms, U);
     patchVertex(shader);
     let f = shader.fragmentShader;
-    f = f.replace('#include <common>', '#include <common>\nuniform float uWrap;\nuniform vec3 uSSS;\nuniform vec3 uSkinTint;\nuniform float uNailD[' + NSEG + '];\n' + NOISE_CORE + PERTURB + WOUND_GLSL);
+    f = f.replace('#include <common>', '#include <common>\nuniform float uWrap;\nuniform vec3 uSSS;\nuniform vec3 uSkinTint;\nuniform vec4 uAuraA;\nuniform vec4 uAuraB;\nuniform float uNailD[' + NSEG + '];\n' + NOISE_CORE + PERTURB + WOUND_GLSL);
     f = f.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
       ${GONE_DISCARD}
       // 앞면 너머: 짓이겨져 눌린 살갗(피범벅). 열린 끝 안쪽은 단면
@@ -554,6 +554,19 @@ function makeSkinMaterial(U) {
         subC = mix(subC, vec3(0.14, 0.006, 0.004), smoothstep(0.4, 0.8, vnoise(vBind * 300.0 + 2.0)) * 0.5);
         col = mix(subC, capC, capK);
       }
+      // 모아치기 냉기: 핏기가 가시고 너클부터 손목 쪽으로 서리가 번짐
+      if (uAuraA.x > 0.001) {
+        float frA = uAuraA.x;
+        float zT = 0.13 - frA * 0.21;
+        float cover = smoothstep(zT - 0.012, zT + 0.012, vBind.z + (vnoise(vBind * 160.0) - 0.5) * 0.03);
+        col = mix(col, col * vec3(0.7, 0.86, 1.08), frA * 0.65);
+        vec3 iceC = mix(vec3(0.30, 0.55, 0.92), vec3(0.74, 0.88, 1.0), smoothstep(0.5, 0.85, vnoise(vBind * 620.0)));
+        // 서리는 군데군데 덩어리로 앉고, 그 사이로 시퍼렇게 언 살이 보임
+        float frP = smoothstep(0.38, 0.62, vnoise(vBind * 260.0 + 3.0) * 0.7 + vnoise(vBind * 900.0) * 0.3);
+        col = mix(col, iceC, cover * frA * (0.12 + 0.8 * frP));
+      }
+      // 모아치기 중력: 살갗이 검보랏빛으로 죽음
+      if (uAuraA.w > 0.001) col = mix(col, col * vec3(0.16, 0.06, 0.2), uAuraA.w * 0.9 * (0.35 + 0.65 * smoothstep(-0.2, 0.04, vBind.z)));
       diffuseColor.rgb = col;
       float wetness = max(max(bl, ws.abr), max(ws.cut, max(rim, max(ws.acid, max(mashW, max(rimW * 0.8, capK))))));
     `);
@@ -587,9 +600,32 @@ function makeSkinMaterial(U) {
       reflectedLight.indirectSpecular *= aoK;
       reflectedLight.directDiffuse *= mix(1.0, vAO, 0.35);
     `);
+    f = f.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      if (dot(uAuraA, uAuraA) + dot(uAuraB, uAuraB) > 1e-6) {
+        float fres = pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 2.0);
+        // 불: 너클·손등이 달아올라 이글거림
+        if (uAuraA.y > 0.001) {
+          float fl = 0.6 + 0.4 * vnoise(vec3(vBind.xy * 190.0, uTime * 9.0));
+          float zone = 0.45 + 0.55 * smoothstep(-0.05, 0.08, vBind.z);
+          totalEmissiveRadiance += vec3(1.35, 0.3, 0.03) * uAuraA.y * (0.2 + 0.8 * fres) * fl * zone;
+        }
+        // 전기: 살갗 밑으로 번개 무늬가 번쩍
+        if (uAuraA.z > 0.001) {
+          float vein = 1.0 - smoothstep(0.0, 0.022, abs(fbm3(vBind * 210.0 + vec3(0.0, 0.0, floor(uTime * 24.0) * 0.37)) - 0.5));
+          float flick = step(0.32, vnoise(vec3(floor(uTime * 30.0), 1.0, 2.0)));
+          float ez = 0.25 + 0.75 * smoothstep(-0.16, 0.04, vBind.z);
+          totalEmissiveRadiance += vec3(0.06, 0.32, 1.5) * uAuraA.z * (vein * (0.25 + 1.0 * flick) * ez + fres * 0.3);
+        }
+        totalEmissiveRadiance += vec3(0.22, 0.42, 0.72) * uAuraA.x * fres * 0.6;
+        totalEmissiveRadiance += vec3(0.38, 0.06, 0.9) * uAuraA.w * fres * 0.6;
+        totalEmissiveRadiance += vec3(1.5, 0.72, 0.08) * uAuraB.x * (0.06 + 1.0 * fres) * (0.85 + 0.15 * sin(uTime * 40.0));
+        totalEmissiveRadiance += vec3(1.0, 0.96, 0.9) * (uAuraB.y * fres * 0.75 + uAuraB.z * (0.12 + 0.8 * fres));
+        totalEmissiveRadiance += vec3(1.25, 0.26, 0.04) * uAuraB.w * smoothstep(0.02, 0.09, vBind.z) * (0.55 + 0.45 * vnoise(vBind * 300.0));
+      }
+    `);
     shader.fragmentShader = f;
   };
-  m.customProgramCacheKey = () => 'cg-skin-2';
+  m.customProgramCacheKey = () => 'cg-skin-6';
   return m;
 }
 
@@ -834,6 +870,24 @@ function makeDepthMaterial(U) {
   return m;
 }
 
+// 잔상(잔상 연타): 살과 똑같이 붓고 짓이겨진 모양 그대로, 반투명하게 빛나는 팔
+export function makeGhostMaterial(U) {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0, transparent: true, opacity: 0.35, depthWrite: false, emissive: new THREE.Color(0.3, 0.27, 0.32), emissiveIntensity: 1 });
+  m.defines = { HAS_AO: '', HAS_NAIL: '', HAS_SWELL: '' };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, U);
+    patchVertex(shader);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec4 uCrush;\nvarying vec3 vBind;\n' + NOISE_CORE)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + GONE_DISCARD)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= vec3(0.9, 0.86, 0.9);\n  diffuseColor.a *= smoothstep(-0.15, 0.03, vBind.z);')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        totalEmissiveRadiance *= 0.15 + 1.5 * pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 2.0);`);
+  };
+  m.customProgramCacheKey = () => 'cg-ghost-1';
+  return m;
+}
+
 // ------------------------------------------------------------------ 상수/해부
 const SEG = {};
 let ANAT = null, HEADER = null;
@@ -951,6 +1005,9 @@ export class Arm {
       uWrap: { value: 0.55 },
       uSSS: { value: new THREE.Color(1.0, 0.32, 0.20) },
       uSkinTint: { value: new THREE.Color().setRGB(...(new URLSearchParams(location.search).get('tint') || '0.86,0.70,0.60').split(',').map(Number)) },
+      // 모아치기 기운 — A: 서리, 불, 전기, 중력 / B: 금빛, 테두리빛, 완충 번쩍, 맞은 뒤 남은 열
+      uAuraA: { value: new THREE.Vector4(0, 0, 0, 0) },
+      uAuraB: { value: new THREE.Vector4(0, 0, 0, 0) },
     };
     this.squash = 0;                      // 벽에 맞아 손이 눌린 정도(0~1, 게임이 매 프레임 넣음)
     this.root = new THREE.Group();        // 위치·자세 (게임이 조종)

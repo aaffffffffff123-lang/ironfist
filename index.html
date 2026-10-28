@@ -26,7 +26,9 @@
   --font:'Noto Sans KR',-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--font);overscroll-behavior:none;word-break:keep-all}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--font);overscroll-behavior:none;word-break:keep-all;-webkit-touch-callout:none}
+/* 길게 눌러 모으는 동안 글자 선택·돋보기·메뉴가 뜨지 않게 */
+body.playing{-webkit-user-select:none;user-select:none}
 canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
 button{font-family:inherit}
 #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:60;transition:opacity .5s}
@@ -132,6 +134,8 @@ body.playing #sound{display:none}
 .wall .wt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .wall .wt b{font-size:14px}
 .wall .wt small{font-size:11px;color:var(--ink2);line-height:1.4}
+.wall .wt .sk{font-size:12px;font-weight:900;color:#9a5b00;letter-spacing:-.01em}
+.wall.locked .wp em{background:#ece9e2;color:#99958c}
 .wall .wp{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px;max-width:98px}
 .wall .wp em{font-style:normal;font-weight:900;font-size:13px;font-variant-numeric:tabular-nums;background:var(--hi);color:var(--hi-ink);padding:3px 6px;border-radius:7px}
 .wall .wp i{font-style:normal;font-weight:900;font-size:12px}
@@ -198,8 +202,8 @@ body.playing #sound{display:none}
 <div id="err"></div>
 
 <!-- ?v= : 고친 파일을 올렸을 때 예전 파일이 브라우저 캐시에서 섞여 나오지 않게 -->
-<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=3","./fx.js":"./fx.js?v=4","./sfx.js":"./sfx.js?v=6","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=5","./scrap.js":"./scrap.js?v=2","./ui.js":"./ui.js?v=8","./room-env.js":"./room-env.js?v=2"}}</script>
-<script type="module" src="./game.js?v=8"></script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=4","./fx.js":"./fx.js?v=4","./sfx.js":"./sfx.js?v=7","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=5","./scrap.js":"./scrap.js?v=3","./ui.js":"./ui.js?v=9","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=1"}}</script>
+<script type="module" src="./game.js?v=9"></script>
 </body>
 </html>
 

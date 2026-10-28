@@ -7,10 +7,11 @@ import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
 import { Scrap } from './scrap.js';
 import { UI } from './ui.js';
+import { SkillFX, SKILL_OF, SKILLS, skillKind } from './skills.js';
 
 const WALL_D = 0.62;                 // 카메라 → 벽 거리
-const FLESH_RATE = 400;              // 살 손실 1.0 당 크레딧(벽 배율 전)
-const SCRAP_RATE = 1.2;              // 고철 HP 1 당 크레딧
+const FLESH_RATE = 1200;             // 살 손실 1.0 당 크레딧(벽 배율 전) — 한 판에 다음 벽 하나를 살 만큼
+const SCRAP_RATE = 3.6;              // 고철 HP 1 당 크레딧
 const DAMAGE_PACE = 0.65;            // 한 판에서 손·고철이 박살나는 속도
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
@@ -76,9 +77,9 @@ const G = {
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
   decals: {}, stuck: {},
-  seenHints: {},
+  seenHints: {}, seenSkill: {},
 };
-let assets, arms = {}, wall = null, fx, sfx, ui;
+let assets, arms = {}, wall = null, fx, sfx, ui, skillFx = null;
 let mode = 'title';      // title | play | over | shop
 let round = null;
 let time = 0, rtime = 0, hitstop = 0;
@@ -99,6 +100,7 @@ function load() {
     G.owned = [...new Set((Array.isArray(G.owned) ? G.owned : []).filter((id) => valid.has(id)))];
     if (!G.owned.includes('cement')) G.owned.unshift('cement');
     if (!valid.has(G.wall) || !G.owned.includes(G.wall)) G.wall = 'cement';
+    if (!G.seenSkill || typeof G.seenSkill !== 'object') G.seenSkill = {};
     for (const bag of [G.decals, G.stuck]) if (bag && typeof bag === 'object') delete bag.traps;
     // 예전 버전의 벽 타격 흔적 저장값도 함께 폐기한다.
     delete G.wallDamage;
@@ -109,6 +111,8 @@ function load() {
 // ------------------------------------------------------------------ 자세
 const tmpM = new THREE.Matrix4(), tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
 const AX_X = new THREE.Vector3(1, 0, 0);
+const AX_Z = new THREE.Vector3(0, 0, 1);
+const TAU = Math.PI * 2;
 function basisQuat(D, U) {
   const z = D.clone().normalize();
   const y = U.clone().addScaledVector(z, -U.dot(z)).normalize();
@@ -127,7 +131,9 @@ function poses(side, armObj) {
   const restD = new THREE.Vector3(p ? 0.10 : 0.16, 0.30, -1);
   const restU = new THREE.Vector3(-0.30, 1, 0.05);
   const shoulder = new THREE.Vector3(p ? -0.165 : -0.19, -0.25, -0.03);
-  const hitTarget = new THREE.Vector3(-(p ? 0.044 : 0.058), p ? -0.045 : -0.05, -WALL_D);
+  // 잔상 연타는 한 대마다 조금씩 다른 자리를 침
+  const aim = fists[side] ? fists[side].aimOff : null;
+  const hitTarget = new THREE.Vector3(-(p ? 0.044 : 0.058) + (aim ? aim.x : 0), (p ? -0.045 : -0.05) + (aim ? aim.y : 0), -WALL_D);
   const hitU = new THREE.Vector3(-0.10, 1, 0);
   const reach = armObj ? armObj.reach() : 0.097;
   const stop = wall ? wall.stopDepth : 0;
@@ -224,6 +230,10 @@ class Fist {
     this.lastPress = -9;
     // 누르고 있는 동안은 발사하지 않는다. 가드로 완전히 돌아온 뒤부터 실제 충전 시간을 센다.
     this.inputHeld = false; this.chargeStart = -1; this.punchCharge = 0;
+    // 잔상 연타: 남은 대수, 다음 대까지 시간, 이번 대가 노리는 자리
+    this.barrage = 0; this.rushing = false; this.rushT = 0; this.rushT0 = 0.026;
+    this.aimOff = this.aimOff ? this.aimOff.set(0, 0, 0) : new THREE.Vector3();
+    this.skillLaunch = null;
     // 맞은 순간의 느낌 — 실제 시간으로 흐름(히트스톱 동안에도 떨림·눌림이 보이게)
     this.impT = 9; this.impA = 0; this.impDir = new THREE.Vector3(1, 0, 0); this.jit = new THREE.Vector3(); this._jf = false;
     this.comp = 0; this.compT = 0; this.push = 0.009; this.squashK = 1;
@@ -261,8 +271,8 @@ class Fist {
     const started = this.chargeStart;
     this.inputHeld = false;
     this.chargeStart = -1;
-    if (cancel || mode !== 'play' || !round || round.ended) return;
-    if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
+    if (cancel || mode !== 'play' || !round || round.ended) { skillFx?.chargeCancel(this.arm.side); return; }
+    if (!this.arm.canPunch()) { skillFx?.chargeCancel(this.arm.side); this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
     // 가드에서 충전 중이었다면 손을 뗀 순간 발사. 짧은 터치는 기존 일반타와 같다.
     if (started >= 0 && this.state === 'idle' && now >= this.flinchUntil) {
       const held = Math.max(0, realNow - started);
@@ -276,6 +286,7 @@ class Fist {
   cancelHold() {
     this.inputHeld = false;
     this.chargeStart = -1;
+    skillFx?.chargeCancel(this.arm.side);
   }
   startPunch(now, charge = 0) {
     this.state = 'out';
@@ -284,9 +295,18 @@ class Fist {
     this.wind = !this.autoPunch && this.punchCharge <= 0 && this.s < 0.15 ? 1 : 0;
     // 덜 돌아온 데서 다시 치면 거리가 짧은 만큼 빨리 닿음
     this.dur = (this.autoPunch ? 0.07 : STRIKE_T) * (0.45 + 0.55 * clamp(1 - this.s0, 0, 1.1)) / this.speed();
+    if (this.rushing) this.dur = 0.036;
+    this.skillLaunch = null;
+    if (this.punchCharge > 0 && skillFx) {
+      const sk = skillFx.skill;
+      this.skillLaunch = sk.id;
+      // 회오리는 팔이 한 바퀴 비틀리며 나가는 게 보이도록 조금 늦게 닿음
+      if (sk.id === 'twist') this.dur *= 1.7;
+      skillFx.launch(this.arm.side, this.punchCharge, this);
+    }
     this.lastPress = now;
     registerPunch(this, now);
-    sfx.whoosh(this.arm.side, this.dur, this.autoPunch ? 0.18 : 0.3 + this.punchCharge * 0.28);
+    sfx.whoosh(this.arm.side, this.dur, this.autoPunch ? (this.rushing ? 0.12 : 0.18) : 0.3 + this.punchCharge * 0.28);
   }
   goBack(dur, slow = false) { this.state = 'back'; this.s0 = this.s; this.u = 0; this.dur = dur; this.slow = slow; }
   get t() { return clamp(this.s, 0, 1); }   // 벽(슬라임 움푹 패임)이 읽는 뻗은 정도
@@ -333,6 +353,21 @@ class Fist {
         if (this.spasmT <= 0) {
           if (this.spasm > 0) { this.spasm--; this.autoPunch = true; this.startPunch(now); }
           else this.goBack(BACK_T);
+        }
+        break;
+      }
+      case 'rush': {
+        // 잔상 연타: 반쯤만 빠졌다가 다른 자리로 다시 꽂힘
+        this.rushT -= dt;
+        const k = clamp(1 - Math.max(0, this.rushT) / this.rushT0, 0, 1);
+        this.s = 1 - 0.5 * smooth(k);
+        if (this.rushT <= 0) {
+          if (this.barrage > 0 && this.arm.canPunch() && round && !round.ended) {
+            this.barrage--;
+            { const ang = Math.random() * TAU, r = rnd(0.03, 0.07); this.aimOff.set(Math.cos(ang) * r, Math.sin(ang) * r * 0.8 + 0.008, 0); }
+            this.autoPunch = true;
+            this.startPunch(now);
+          } else { this.rushing = false; this.barrage = 0; this.aimOff.set(0, 0, 0); this.goBack(BACK_T); }
         }
         break;
       }
@@ -409,9 +444,18 @@ class Fist {
       out.position.x += sg * charge * 0.006 * launchFade;
       out.position.y -= charge * 0.007 * launchFade;
       tmpQ.setFromAxisAngle(AX_X, -(0.05 * prep + 0.13 * charge) * launchFade); out.quaternion.multiply(tmpQ);
-      const trem = launching ? 0 : prep * 0.00025 + charge * 0.00125;
-      out.position.x += Math.sin(rtime * 53 + (sg < 0 ? 0 : 2.1)) * trem;
-      out.position.y += Math.sin(rtime * 47 + 0.8) * trem * 0.7;
+      const sk = skillFx ? skillFx.skill.id : 'shock';
+      // 잔상 연타·대폭발은 모을수록 주먹이 더 심하게 떨림
+      const tremK = sk === 'barrage' ? 3.2 : sk === 'final' ? 2.6 : 1;
+      const trem = launching ? 0 : prep * 0.00025 + charge * 0.00125 * tremK;
+      out.position.x += Math.sin(rtime * (sk === 'barrage' ? 97 : 53) + (sg < 0 ? 0 : 2.1)) * trem;
+      out.position.y += Math.sin(rtime * (sk === 'barrage' ? 89 : 47) + 0.8) * trem * 0.7;
+      // 회오리: 모으는 동안 팔을 반대로 감았다가, 내지를 때 한 바퀴 비틀며 나감
+      if (sk === 'twist') {
+        const W = 1.15;
+        const ang = launching ? -W * this.punchCharge + (TAU + W * this.punchCharge) * smooth(this.u) : -W * charge;
+        tmpQ.setFromAxisAngle(AX_Z, ang * (sg < 0 ? 1 : -1)); out.quaternion.multiply(tmpQ);
+      }
     }
     // 반동: 내지르기 직전 손목을 살짝 젖힘
     if (this.state === 'out' && this.wind) { const w = Math.sin(Math.PI * Math.min(1, this.u / 0.45)) * (1 - this.u); tmpQ.setFromAxisAngle(AX_X, -0.12 * w); out.quaternion.multiply(tmpQ); }
@@ -471,6 +515,8 @@ function onImpact(fist, now) {
   const powerFxK = smooth(clamp((chargeK - 0.10) / 0.90, 0, 1));
   const res = { flesh: 0, scrap: 0, ev: [], point: null, finger: -1 };
   const W = wall.def;
+  const skill = skillFx ? skillFx.skill : SKILLS[0];
+  const full = chargeK >= 0.98;
   const P = poses(a.side, a);
   // 벽 고유 반응 먼저 (걸림·경련 등)
   fx.lastContact = P.contact.clone();
@@ -490,8 +536,11 @@ function onImpact(fist, now) {
     a._apply();
     left = 0;
   } else {
+    // 회오리: 비틀린 손목이 일찍 꺾여 처짐
+    if (skill.id === 'twist' && chargeHit > 0.3 && a.I < 0.5 && !a.wristBroken) a.tWrist = Math.max(a.I + 0.012, a.tWrist - 0.08 * chargeHit);
     // 완충 세 번이면 건강한 주먹이 사라질 만큼 고정 자해량을 더한다. 벽에는 피해를 저장하지 않는다.
-    a.damageFlesh(left + CHARGE_FLESH * chargeHit, W.kind, res);
+    // 모은 기술의 성격(화상·동상·감전…)이 내 손에 그대로 남는다.
+    a.damageFlesh(left + CHARGE_FLESH * chargeHit, chargeHit > 0.02 ? skillKind(W.kind, skill, chargeHit) : W.kind, res);
   }
   // 크레딧
   const credits = Math.round(res.flesh * FLESH_RATE * W.mult + res.scrap * SCRAP_RATE * W.mult + eventCredits(res.ev) * W.mult);
@@ -507,9 +556,14 @@ function onImpact(fist, now) {
   sfx.impact(W.id, res, power, a, a.side, feel);
   if (powerFxK >= 0.04) {
     const scrap = striker === 'scrap' || striker === 'pipe';
-    fx.powerImpact?.(P.contact, { strength: powerFxK, scrap, side: a.side, full: chargeK >= 0.98 });
+    // 기본 기술(충격파)은 원래 연출, 나머지는 벽마다의 기술 연출
+    if (!skillFx || skill.id === 'shock') fx.powerImpact?.(P.contact, { strength: powerFxK, scrap, side: a.side, full });
+    else skillFx.impact(a.side, P.contact, powerFxK, { scrap, full, arm: a, fist });
     sfx.powerImpact?.(a.side, scrap, powerFxK);
   }
+  // 잔상 연타: 모은 첫 대가 꽂히면 여러 대가 이어서 들어감
+  if (skill.id === 'barrage' && !fist.autoPunch && chargeK >= 0.35 && !react.stick && a.canPunch()) { fist.rushing = true; fist.barrage = 4 + Math.round(5 * chargeK); }
+  else if (fist.rushing && fist.autoPunch && skillFx) skillFx.barrageHit(a.side, P.contact, fist.barrage === 0);
   for (const e of res.ev) handleEvent(a, e, P.contact);
   dropCrushed(a);
   a.kick(power);
@@ -517,7 +571,9 @@ function onImpact(fist, now) {
   const pacedHs = (react.stick ? 0.045 : 0.052 + tier * 0.014) / (1 + 0.35 * rush) + Math.min(0.09, evW * 0.12);
   // 난타 중에도 벽에 닿은 프레임은 읽히게 하되, 입력 리듬을 막을 만큼 길게 멈추지는 않는다.
   const normalHs = Math.max(0.034, pacedHs);
-  const hs = Math.max(normalHs, 0.034 + powerFxK * 0.056);
+  let hs = Math.max(normalHs, 0.034 + powerFxK * 0.056);
+  if (fist.rushing && fist.autoPunch) hs = 0.022;
+  if (skill.id === 'final' && full) hs = Math.max(hs, 0.13);
   hitstop = Math.max(hitstop, hs);
   fist.hitFeel(feel + chargeHit * 0.55, react, a, hs);
   camKick(a.side, feel, evW);
@@ -526,7 +582,11 @@ function onImpact(fist, now) {
   vibrate(chargeK > 0.85 ? [45, 35, 70] : res.ev.length ? [30, 25, 30] : Math.round(16 + feel * 10));
   round.punches++;
   // 걸림 상태
-  if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckTaps = react.taps || 3; fist.stuckT = 0; showHint('stuck'); }
+  if (fist.rushing && !react.stick) {
+    if (fist.barrage > 0) { fist.state = 'rush'; fist.rushT = fist.rushT0 = 0.026; }
+    else { fist.rushing = false; fist.aimOff.set(0, 0, 0); fist.state = 'spasm'; fist.spasm = 0; fist.spasmT = fist.spasmT0 = 0.05; }
+  }
+  else if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckTaps = react.taps || 3; fist.stuckT = 0; showHint('stuck'); }
   else if (react.stick === 'pinned') { fist.state = 'pinned'; fist.pinT = react.pin || 2; fist.stuckTaps = 99; showHint('pinned'); }
   else if (react.stick === 'sink') { fist.state = 'sink'; fist.sinkT = react.sink || 0.4; }
   else if (react.spasm && !fist.autoPunch) { fist.state = 'spasm'; fist.spasm = react.spasm; fist.spasmT = fist.spasmT0 = 0.06; }
@@ -539,7 +599,7 @@ function onImpact(fist, now) {
 
 // mfract: 손등뼈 골절(너클이 꺼짐), fract: 손가락뼈 골절, open: 뼈가 살을 뚫고 나옴, nail: 손톱이 깨짐
 // crush: 앞면이 더 짓이겨짐, finger: 손가락이 짓이겨져 뭉개짐, hand: 손목 위가 다 없어짐, stump: 팔뚝 끝이 짓이겨짐
-const EV_CREDITS = { mfract: 12, fract: 12, open: 15, nail: 8, finger: 20, wrist: 30, hand: 60, crush: 0, stump: 4, lumpGone: 8, pipeGone: 5 };
+const EV_CREDITS = { mfract: 36, fract: 36, open: 45, nail: 24, finger: 60, wrist: 90, hand: 180, crush: 0, stump: 12, lumpGone: 24, pipeGone: 15 };
 const EV_WEIGHT = { mfract: 0.42, fract: 0.3, open: 0.35, nail: 0.1, finger: 0.38, wrist: 0.45, hand: 0.7, crush: 0.05, stump: 0.08, lumpGone: 0.3, pipeGone: 0.2 };
 function eventCredits(evs) {
   let c = 0;
@@ -653,6 +713,7 @@ function newRound() {
   for (const s of ['L', 'R']) resetArmMotion(s);
   hitstop = 0; rush = 0; cam.trauma = 0;
   for (const s of CAM_SPRINGS) s.reset();
+  skillFx?.clear();
 }
 
 function checkRoundEnd() {
@@ -664,6 +725,7 @@ function checkRoundEnd() {
     // 판이 끝나면 남은 입력·감전 연타를 멈추고 팔만 가드로 돌아옴.
     for (const f of Object.values(fists)) {
       f.queue = 0; f.autoPunch = false; f.pendingChain = null; f.spasm = 0;
+      f.barrage = 0; f.rushing = false; f.aimOff.set(0, 0, 0);
       if (f.state !== 'idle' && f.state !== 'back') f.goBack(BACK_T);
     }
     chain = [];
@@ -676,6 +738,7 @@ function endRound() {
   cancelAllInputs();
   mode = 'shop';
   document.body.classList.remove('playing');
+  skillFx?.clear();
   fx.persist();
   sfx.play('end', 0.5);
   G.stats.rounds++;
@@ -695,10 +758,13 @@ function armSnapshot(a) {
 function setWall(id) {
   const def = WALLS.find((w) => w.id === id) || WALLS[0];
   id = def.id;
+  skillFx?.clear();
   if (wall) { fx.clearPowerImpact?.(); fx.persist(); wall.dispose(); }
   wall = createWall(id, { scene, renderer, fx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
   G.wall = id;
   fx.bindWall(wall);
+  // 모아치기 기술은 지금 벽을 따라감
+  skillFx?.setSkill(SKILL_OF[id]);
   // 새 벽 재질은 미리(가능하면 백그라운드로) 컴파일
   try { if (renderer.compileAsync) renderer.compileAsync(wall.group, camera, scene).catch(() => {}); } catch (e) {}
   sfx.ambience(id);
@@ -797,8 +863,15 @@ window.addEventListener('mouseup', (e) => {
   finishSideHold(side, `mouse:${e.button}`, false);
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-window.addEventListener('blur', cancelAllInputs);
-document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAllInputs(); });
+// 다른 앱·탭으로 가거나 화면이 꺼지면 소리를 통째로 멈추고, 돌아오면 다시 켬
+function goBackground() { cancelAllInputs(); sfx?.suspend(); }
+function comeBack() { if (!document.hidden && document.hasFocus()) sfx?.resume(); }
+window.addEventListener('blur', goBackground);
+window.addEventListener('focus', comeBack);
+window.addEventListener('pagehide', goBackground);
+window.addEventListener('pageshow', comeBack);
+document.addEventListener('visibilitychange', () => { if (document.hidden) goBackground(); else comeBack(); });
+document.addEventListener('freeze', goBackground);
 
 function vibrate(p) { try { if (navigator.vibrate && G.vibrate !== false) navigator.vibrate(p); } catch (e) {} }
 
@@ -850,8 +923,10 @@ function frame(nowMs) {
 }
 // 한 걸음: 멈춤(히트스톱) 동안은 세상 시간만 거의 멈추고, 화면 반동·주먹 떨림은 실제 시간으로 흐름
 function advance(rdt) {
-  let dt = rdt;
-  if (hitstop > 0) { const h = Math.min(hitstop, rdt); hitstop -= rdt; dt = rdt - h + h * HS_SLOW; }
+  // 대폭발 슬로모션: 세상 시간만 느려짐(화면 반동·덮개는 실제 시간)
+  const ts = skillFx ? skillFx.timeScale : 1;
+  let dt = rdt * ts;
+  if (hitstop > 0) { const h = Math.min(hitstop, rdt); hitstop -= rdt; dt = (rdt - h + h * HS_SLOW) * ts; }
   time += dt; rtime += rdt;
   rush = Math.max(0, rush - rdt * 2.5);
   step(dt, rdt);
@@ -906,8 +981,21 @@ function step(dt, rdt = dt) {
   }
   if (wall) wall.update(dt, time, arms, fists);
   fx.update(dt, time, rdt);
+  if (skillFx) {
+    for (const s of ['L', 'R']) {
+      const f = fists[s];
+      let k = 0;
+      const holding = mode === 'play' && f.inputHeld && f.chargeStart >= 0 && f.state === 'idle' && now() >= f.flinchUntil;
+      if (holding) k = smooth(clamp((realSeconds() - f.chargeStart - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1));
+      skillFx.setCharge(s, k, holding);
+    }
+    skillFx.update(dt, rdt, time);
+    // 중력이 터지거나 대폭발이 날 때 화면이 크게 밀림
+    if (skillFx.camPunch) { const n = skillFx.camPunch; skillFx.camPunch = 0; cam.trauma = Math.min(1, cam.trauma + 0.5 * n); cam.push.kick(-0.012 * n); cam.fov.kick(-4 * n); cam.pitch.kick(-1.2 * n * D2R); }
+  }
   camUpdate(rdt);
 }
+function now() { return time; }
 
 let freeCam = null;   // 디버그: {p, t}
 const _dbs = new THREE.Vector2();
@@ -921,13 +1009,15 @@ function render() {
   camera.rotateX(cam.pitch.x + a * 1.0 * D2R * nz(0, 107, 163));
   camera.rotateY(cam.yaw.x + a * 0.75 * D2R * nz(1, 97, 151));
   camera.rotateZ(cam.roll.x + a * 1.4 * D2R * nz(2, 113, 173));
-  const fov = baseFov + cam.fov.x;
+  const fov = baseFov + cam.fov.x - (skillFx ? skillFx.zoom * 7 : 0);
   if (Math.abs(fov - camera.fov) > 1e-4) { camera.fov = fov; camera.updateProjectionMatrix(); }
   // 입자 크기: 화면 높이(픽셀)와 시야각에 맞춤 — 세로 폰 화면(배율 2)에서 예전과 같은 크기
   PUFF_SCALE.value = renderer.getDrawingBufferSize(_dbs).y / (2 * Math.tan(camera.fov * D2R / 2)) / 1120;
   if (freeCam) { camera.position.copy(freeCam.p); camera.lookAt(freeCam.t); }
   renderer.clear();
   renderer.render(scene, camera);
+  // 잔상 연타: 지나간 자리마다 반투명한 팔을 덧그림
+  if (skillFx) skillFx.renderGhosts();
 }
 
 // ------------------------------------------------------------------ 시작
@@ -939,10 +1029,13 @@ async function boot() {
   fx = new FX(scene, renderer, G, lightPool);
   fx.anat = ANAT;
   sfx = new SFX();
+  // 소리를 꺼 두고 나갔으면 다시 들어와도 꺼진 채로
+  sfx.setMuted(!!G.muted);
   await sfx.prepare();
   arms.L = new Arm(assets, 'L'); arms.R = new Arm(assets, 'R');
   scene.add(arms.L.root, arms.R.root);
   fists.L = new Fist(arms.L); fists.R = new Fist(arms.R);
+  skillFx = new SkillFX({ scene, camera, renderer, fx, sfx, arms, fists, lightPool, lights: [hemi, key, fill, rim, ...lightPool], getWall: () => wall });
   setWall(G.owned.includes(G.wall) ? G.wall : 'cement');
   // 저장된 팔 상태 복원
   for (const s of ['L', 'R']) restoreArm(arms[s], G.arms[s]);
@@ -965,6 +1058,7 @@ function warmup() {
   try { renderer.compile(scene, camera); } catch (e) { console.warn(e); }
   for (const m of hidden) m.visible = false;
   for (const m of tmp) scene.remove(m);
+  skillFx.warm();
 }
 
 function restoreArm(a, snap) {
@@ -996,7 +1090,10 @@ const actions = {
     ui.credits(G.credits, 0);
     render();
     ui.hidePanels(); ui.hud(true);
-    showHint('controls');
+    // 처음 치는 벽이면 이 벽의 모아치기를 한 줄로 알려 줌(처음 시작이면 조작 안내가 먼저)
+    const sk = SKILL_OF[G.wall];
+    if (!G.seenHints.controls) showHint('controls');
+    else if (sk && sk.id !== 'shock' && !G.seenSkill[sk.id]) { G.seenSkill[sk.id] = true; ui.say(`새 모아치기: ${sk.name}`); save(); }
     return true;
   },
   newGame() {
@@ -1006,6 +1103,8 @@ const actions = {
   buyWall(id) {
     const d = WALLS.find((w) => w.id === id);
     if (!d || G.owned.includes(id) || G.credits < d.price) return false;
+    // 벽은 순서대로만 — 건너뛰면 그 벽의 모아치기를 못 보고 지나가게 됨
+    if (nextWall() !== d) return false;
     if (!arms.L.hasFist() && !arms.R.hasFist() && G.credits - d.price < Math.min(scrapPrice(arms.L), scrapPrice(arms.R))) return 'need';
     G.credits -= d.price; G.owned.push(id); setWall(id); save();
     sfx.play('buy', 0.8);
@@ -1034,11 +1133,13 @@ const actions = {
   },
   canStart() { return arms.L.hasFist() || arms.R.hasFist(); },
   restorePrice, scrapPrice: (s) => scrapPrice(arms[s]),
+  nextWall: () => nextWall(),
   armInfo(s) { const a = arms[s]; return { flesh: a.I < 0.5, I: a.I, scrap: !!(a.scrap && a.scrap.lumpHP > 0), fist: a.hasFist(), crushed: a.crushZ < 0.095, broken: a.brokenK() > 0 }; },
   toggleSound(on) { sfx.setMuted(!on); G.muted = !on; save(); },
   isMuted() { return !!G.muted; },
 };
 
+function nextWall() { return WALLS.find((w) => !G.owned.includes(w.id)) || null; }
 // 손 회복은 늘 벽보다 비쌈: 다음에 살 벽 값의 1.2배(다 샀으면 가장 비싼 벽 기준)
 function restorePrice() {
   const next = WALLS.find((w) => !G.owned.includes(w.id));
@@ -1056,7 +1157,7 @@ function tick(dt, n = 1, draw = true) {
   for (let i = 0; i < n; i++) advance(dt);
   if (draw) render();
 }
-window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; } };
+window.__cg = { tick, setManual(v) { manual = v; }, G, arms, fists, get wall() { return wall; }, actions, setWall, press: pressSide, get mode() { return mode; }, set mode(v) { mode = v; }, step, newRound, get round() { return round; }, addCredits, poses, camera, scene, renderer, set freeCam(v) { freeCam = v ? { p: new THREE.Vector3(...v.p), t: new THREE.Vector3(...v.t) } : null; }, THREE, SEG, get ANAT() { return ANAT; }, get fx() { return fx; }, get sfx() { return sfx; }, cam, get hitstop() { return hitstop; }, get skillFx() { return skillFx; }, get time() { return time; } };
 
 boot().catch((e) => { console.error(e); const el = $('#err'); if (el) { el.textContent = '불러오기 실패: ' + e.message; el.style.display = 'block'; } });
 

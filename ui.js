@@ -1,4 +1,5 @@
 // 철권 — 화면(제목·HUD·결과·가게)
+import { SKILL_OF } from './skills.js';
 const $ = (s, r = document) => r.querySelector(s);
 const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
 const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -80,9 +81,14 @@ export class UI {
       pinned: '팔이 꿰였습니다. 같은 쪽을 눌러 버둥거리면 빨리 빠집니다',
     }[id];
     if (!txt) return;
+    this.say(txt);
+  }
+  // 아래쪽에 한 줄 안내
+  say(txt, ms = 3800) {
     const h = this.el.hint;
+    h.classList.remove('top');
     h.textContent = txt; h.classList.add('show');
-    clearTimeout(this._ht); this._ht = setTimeout(() => h.classList.remove('show'), 3800);
+    clearTimeout(this._ht); this._ht = setTimeout(() => h.classList.remove('show'), ms);
   }
   // ------------------------------------------------ 결과 + 가게
   showShop(round) {
@@ -130,19 +136,24 @@ export class UI {
     // 벽은 현재 선택만 먼저 보여 주고, 목록은 필요할 때 펼친다.
     const selected = this.WALLS.find((w) => w.id === G.wall);
     $('#sWallName').textContent = selected ? selected.name : '';
-    $('#sWallMult').textContent = selected ? '수입 ×' + selected.mult : '';
+    $('#sWallMult').textContent = selected ? `수입 ×${selected.mult} · 모아치기: ${SKILL_OF[selected.id]?.name || ''}` : '';
+    const next = A.nextWall ? A.nextWall() : null;
     const reserve = A.canStart() ? 0 : Math.min(A.scrapPrice('L'), A.scrapPrice('R'));
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
       const owned = G.owned.includes(w.id), cur = G.wall === w.id;
-      const poor = !owned && G.credits < w.price;
-      const needsArm = !owned && !poor && G.credits - w.price < reserve;
+      // 벽은 순서대로만 살 수 있음
+      const locked = !owned && next && next.id !== w.id;
+      const poor = !owned && !locked && G.credits < w.price;
+      const needsArm = !owned && !poor && !locked && G.credits - w.price < reserve;
+      const sk = SKILL_OF[w.id];
       const row = document.createElement('button');
-      row.className = 'wall' + (cur ? ' cur' : '') + (owned ? ' owned' : '') + (poor || needsArm ? ' poor' : '');
-      row.disabled = cur || poor || needsArm;
+      row.className = 'wall' + (cur ? ' cur' : '') + (owned ? ' owned' : '') + (poor || needsArm || locked ? ' poor' : '') + (locked ? ' locked' : '');
+      row.disabled = cur || poor || needsArm || locked;
+      const note = locked ? '앞 벽부터' : needsArm ? '철권 비용 필요' : poor ? '크레딧 부족' : '';
       row.innerHTML = `<span class="sw" style="background:${SWATCH[w.id]}"></span>
-        <span class="wt"><b>${w.name}</b><small>${w.desc}</small></span>
-        <span class="wp">${cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>구매 ' + fmt(w.price) + '</em>'}<small>수입 ×${w.mult}</small>${needsArm || poor ? '<small>' + (needsArm ? '철권 비용 필요' : '크레딧 부족') + '</small>' : ''}</span>`;
+        <span class="wt"><b>${w.name}</b><span class="sk">모아치기: ${sk ? sk.name : ''}</span><small>${w.desc}</small></span>
+        <span class="wp">${cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>구매 ' + fmt(w.price) + '</em>'}<small>수입 ×${w.mult}</small>${note ? '<small>' + note + '</small>' : ''}</span>`;
       row.addEventListener('click', () => {
         if (cur) return;
         if (owned) A.selectWall(w.id);

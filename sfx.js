@@ -446,6 +446,185 @@ function design(S) {
     return out;
   }, 2);
 
+  // ---------------------------------------------------------------- 모아치기 기술
+  // 완충 신호: 짧고 맑은 '팅'
+  put('ready', () => {
+    const o = S.buf(0.4);
+    S.add(o, S.modal(0.36, [[2350, 0.8, 0.11], [4700, 0.32, 0.05], [3530, 0.22, 0.06]]), 0.0, 0.75);
+    const c = S.filt(S.noise(Math.floor(0.004 * S.sr)), 'hp', 3000, 0.7);
+    S.add(o, S.mul(c, S.envExp(c.length, 0.0001, 0.001)), 0, 0.5);
+    return o;
+  }, 2);
+  // 모으기 시작: 바람이 빨려 드는 오르막
+  put('rise', () => {
+    const d = 0.5, o = S.buf(d);
+    const n = S.filt(S.noise(o.length), 'bp', (t) => 300 + 2200 * Math.pow(t / d, 1.6), 1.6);
+    for (let i = 0; i < n.length; i++) { const t = i / S.sr; n[i] *= Math.pow(t / d, 2.2) * (t > d - 0.01 ? (d - t) / 0.01 : 1); }
+    S.add(o, n, 0, 1);
+    return o;
+  }, 2);
+  // 음속 돌파: 내지를 때 채찍 같은 '딱'(N파) + 맞을 때 낮은 폭음
+  put('lSonic', () => {
+    const o = S.buf(0.4), n = Math.floor(0.0026 * S.sr);
+    for (let i = 0; i < n * 2; i++) { const t = i / (n * 2); o[i] += (1 - 2 * t); }
+    for (let i = 0; i < n * 2; i++) { const t = i / (n * 2), j = i + Math.floor(0.046 * S.sr); if (j < o.length) o[j] += (1 - 2 * t) * 0.22; }
+    const hiss = S.filt(S.noise(Math.floor(0.06 * S.sr)), 'hp', 2500, 0.7);
+    S.add(o, S.mul(hiss, S.envExp(hiss.length, 0.0002, 0.012)), 0.001, 0.6);
+    const body = S.filt(S.noise(Math.floor(0.12 * S.sr)), 'bp', 900, 0.8);
+    S.add(o, S.mul(body, S.envExp(body.length, 0.0005, 0.03)), 0, 0.35);
+    return S.sat(o, 1.6);
+  }, 3);
+  put('iSonic', () => {
+    const o = S.buf(0.9);
+    S.add(o, S.sat(S.sweep(0.8, 120, 36, 0.05, 0.22), 2.6), 0, 1);
+    const r = S.filt(S.noise(o.length), 'lp', 260, 0.8);
+    S.add(o, S.mul(r, S.envExp(r.length, 0.004, 0.22)), 0, 0.5);
+    const c = S.filt(S.noise(Math.floor(0.004 * S.sr)), 'hp', 1800, 0.7);
+    S.add(o, c, 0, 0.8);
+    return S.filt(o, 'lp', 5000, 0.7);
+  }, 3);
+  // 잔상 연타: 휙휙휙 잇단 바람
+  put('flurry', () => {
+    const o = S.buf(0.6);
+    for (let k = 0; k < 9; k++) {
+      const d = 0.06, f0 = rnd(500, 800), f1 = rnd(1800, 2600);
+      const y = S.filt(S.noise(Math.floor(d * S.sr)), 'bp', (t) => f0 + (f1 - f0) * Math.min(1, t / d), 1.4);
+      for (let i = 0; i < y.length; i++) { const t = i / S.sr; y[i] *= Math.sin(Math.PI * Math.min(1, t / d)) ** 2; }
+      S.add(o, y, k * 0.05 + rnd(-0.005, 0.005), rnd(0.5, 0.9));
+    }
+    return o;
+  }, 2);
+  // 회오리: 감기며 올라가는 쇳소리 + 바람, 맞을 때 비틀려 갈리는 소리
+  put('lTwist', () => {
+    const d = 0.34, o = S.buf(d); let ph = 0;
+    for (let i = 0; i < o.length; i++) {
+      const t = i / S.sr, f = 160 + 620 * Math.pow(Math.min(1, t / 0.18), 1.4);
+      ph += f / S.sr;
+      const saw = (ph % 1) * 2 - 1;
+      const am = 0.6 + 0.4 * Math.sin(TAU * (18 + 40 * Math.min(1, t / 0.18)) * t);
+      const env = Math.min(1, t / 0.02) * (t < 0.2 ? 1 : Math.exp(-(t - 0.2) / 0.04));
+      o[i] = saw * 0.35 * am * env;
+    }
+    const w = S.filt(S.noise(o.length), 'bp', (t) => 400 + 2200 * Math.min(1, t / 0.18), 2);
+    for (let i = 0; i < w.length; i++) { const t = i / S.sr; w[i] *= (0.5 + 0.5 * Math.sin(TAU * 25 * t)) * Math.min(1, t / 0.03) * (t < 0.2 ? 1 : Math.exp(-(t - 0.2) / 0.05)); }
+    S.add(o, w, 0, 0.8);
+    return S.filt(S.sat(o, 1.4), 'lp', 4500, 0.7);
+  }, 2);
+  put('iTwist', () => {
+    const o = S.buf(0.8);
+    S.add(o, S.grains(0.35, 260, 300, 2400, 0.0005, 0.003, (r) => r * 0.3, 3), 0, 0.9);
+    S.add(o, S.modal(0.4, [[rnd(180, 220), 0.6, 0.12], [rnd(430, 480), 0.4, 0.08], [rnd(900, 980), 0.2, 0.05]]), 0.01, 0.6);
+    const w = S.filt(S.noise(Math.floor(0.5 * S.sr)), 'bp', (t) => 1800 - 1400 * Math.min(1, t / 0.4), 1.2);
+    S.add(o, S.mul(w, S.envExp(w.length, 0.005, 0.12)), 0, 0.6);
+    S.add(o, S.sat(S.sweep(0.4, 140, 45, 0.04, 0.1), 2.4), 0, 0.8);
+    return o;
+  }, 3);
+  // 냉기: 얼음이 와장창 + 떨어지는 조각들
+  put('iFrost', () => {
+    const o = S.buf(1.0);
+    const c = S.filt(S.noise(Math.floor(0.008 * S.sr)), 'hp', 2000, 0.7);
+    S.add(o, S.mul(c, S.envExp(c.length, 0.0001, 0.003)), 0, 1.0);
+    S.add(o, S.grains(0.3, 300, 2000, 9000, 0.0002, 0.0015, (r) => r * r * 0.3, 4), 0, 0.8);
+    for (let k = 0; k < 34; k++) {
+      const f = rnd(2400, 8200);
+      S.add(o, S.modal(0.4, [[f, 1, rnd(0.03, 0.12)], [f * rnd(1.9, 2.7), 0.4, rnd(0.02, 0.06)]]), rnd(0, 0.35) * Math.random(), rnd(0.06, 0.2));
+    }
+    S.add(o, S.sat(S.sweep(0.3, 150, 60, 0.03, 0.06), 2.2), 0, 0.6);
+    return o;
+  }, 3);
+  put('tinkle', () => {
+    const o = S.buf(1.4);
+    for (let k = 0; k < 26; k++) { const f = rnd(3000, 9000); S.add(o, S.modal(0.25, [[f, 1, rnd(0.02, 0.07)], [f * rnd(2, 2.8), 0.3, 0.02]]), rnd(0, 1.1), rnd(0.08, 0.25)); }
+    return o;
+  }, 2);
+  // 화염: 확 붙는 불길 + 불덩이 폭발
+  put('lFire', () => {
+    const d = 0.45, o = S.buf(d);
+    const y = S.filt(S.noise(o.length), 'bp', (t) => 300 + 1400 * Math.min(1, t / 0.12), 0.9);
+    const lo = S.filt(S.noise(o.length), 'lp', 400, 0.8);
+    for (let i = 0; i < o.length; i++) { const t = i / S.sr; const e = Math.min(1, t / 0.03) * Math.exp(-Math.max(0, t - 0.08) / 0.12); o[i] = (y[i] * 0.7 + lo[i] * 0.9) * e; }
+    S.add(o, S.grains(0.4, 40, 1200, 4000, 0.001, 0.003, (r) => r * 0.35, 3), 0, 0.3);
+    return S.sat(o, 1.5);
+  }, 3);
+  put('iFire', () => {
+    const d = 1.6, o = S.buf(d);
+    S.add(o, S.sat(S.sweep(1.0, 140, 32, 0.06, 0.32), 3.0), 0, 1.0);
+    const r = S.filt(S.noise(o.length), 'lp', (t) => 1400 - 1000 * Math.min(1, t / 0.6), 0.8);
+    for (let i = 0; i < r.length; i++) { const t = i / S.sr; r[i] *= Math.min(1, t / 0.025) * Math.exp(-t / 0.45) * (0.75 + 0.25 * Math.sin(TAU * 9 * t + Math.sin(t * 31))); }
+    S.add(o, r, 0, 0.9);
+    S.add(o, S.grains(1.4, 160, 900, 5000, 0.0006, 0.003, (rr) => 0.05 + rr * 1.3, 3), 0, 0.5);
+    return o;
+  }, 3);
+  // 중력: 거꾸로 빨려 드는 소리 → 터지는 '쿵'(따로 냄)
+  put('gSuck', () => {
+    const T = 0.42, o = S.buf(T + 0.02);
+    const y = S.filt(S.noise(Math.floor(T * S.sr)), 'bp', (t) => 180 + 2600 * Math.pow(t / T, 2), 3);
+    for (let i = 0; i < y.length; i++) { const t = i / S.sr; y[i] *= Math.pow(t / T, 2.2); }
+    S.add(o, y, 0, 0.9);
+    let ph = 0;
+    for (let i = 0; i < Math.floor(T * S.sr); i++) { const t = i / S.sr; ph += (40 + 140 * Math.pow(t / T, 2)) / S.sr; o[i] += Math.sin(TAU * ph) * 0.5 * Math.pow(t / T, 1.5); }
+    return o;
+  }, 2);
+  put('gBoom', () => {
+    const o = S.buf(1.2);
+    S.add(o, S.sat(S.sweep(1.0, 90, 26, 0.08, 0.35), 3.2), 0, 1.1);
+    const c = S.filt(S.noise(Math.floor(0.01 * S.sr)), 'hp', 1500, 0.7);
+    S.add(o, S.mul(c, S.envExp(c.length, 0.0001, 0.004)), 0, 0.9);
+    const rr = S.filt(S.noise(Math.floor(0.9 * S.sr)), 'lp', 300, 0.8);
+    S.add(o, S.mul(rr, S.envExp(rr.length, 0.005, 0.3)), 0, 0.5);
+    return o;
+  }, 2);
+  // 번개: 찢어지는 벼락 + 굴러가는 천둥
+  put('iBolt', () => {
+    const o = S.buf(0.9);
+    const c = S.noise(Math.floor(0.012 * S.sr));
+    for (let i = 0; i < c.length; i++) c[i] *= Math.exp(-i / S.sr / 0.003);
+    S.add(o, S.filt(c, 'hp', 900, 0.7), 0, 1.2);
+    S.add(o, S.grains(0.12, 180, 1500, 7000, 0.0002, 0.001, (r) => r * 0.1, 2), 0, 0.9);
+    const z = S.filt(S.noise(Math.floor(0.25 * S.sr)), 'hp', 2500, 0.7);
+    for (let i = 0; i < z.length; i++) z[i] *= (Math.random() < 0.2 ? 1 : 0.1) * Math.exp(-i / S.sr / 0.08);
+    S.add(o, z, 0.01, 0.6);
+    S.add(o, S.sat(S.sweep(0.6, 160, 42, 0.03, 0.15), 2.8), 0, 0.9);
+    return S.sat(o, 1.4);
+  }, 3);
+  put('thunder', () => {
+    const d = 2.2, o = S.buf(d);
+    const r = S.filt(S.filt(S.noise(o.length), 'lp', 220, 0.7), 'hp', 30, 0.7);
+    const bumps = [[0.0, 1.0, 0.3], [rnd(0.25, 0.45), 0.7, 0.35], [rnd(0.6, 0.9), 0.5, 0.45], [rnd(1.0, 1.3), 0.35, 0.5]];
+    for (let i = 0; i < o.length; i++) {
+      const t = i / S.sr; let e = 0;
+      for (const [t0, a, tau] of bumps) if (t >= t0) e += a * Math.min(1, (t - t0) / 0.04) * Math.exp(-(t - t0) / tau);
+      o[i] = r[i] * e * (0.8 + 0.2 * Math.sin(TAU * 7 * t));
+    }
+    return S.sat(o, 1.8);
+  }, 2);
+  // 대폭발: 내지를 때 끌어올리는 굉음 + 맞는 순간 땅이 꺼지는 폭발 + 귀 울림
+  put('lFinal', () => {
+    const d = 0.6, o = S.buf(d);
+    const n = S.filt(S.noise(o.length), 'bp', (t) => 250 + 1800 * Math.min(1, t / 0.4), 0.8);
+    let ph = 0;
+    for (let i = 0; i < o.length; i++) { const t = i / S.sr; ph += (70 + 90 * t) / S.sr; const saw = (ph % 1) * 2 - 1; const e = Math.min(1, t / 0.05) * (t < 0.45 ? 1 : Math.exp(-(t - 0.45) / 0.05)); o[i] = (n[i] * 0.8 + Math.tanh(saw * 3) * 0.35) * e; }
+    return S.filt(S.sat(o, 1.6), 'lp', 6000, 0.7);
+  }, 2);
+  put('iFinal', () => {
+    const d = 3.2, o = S.buf(d);
+    const c = S.noise(Math.floor(0.02 * S.sr));
+    for (let i = 0; i < c.length; i++) c[i] *= Math.exp(-i / S.sr / 0.005);
+    S.add(o, S.filt(c, 'hp', 700, 0.7), 0, 1.0);
+    S.add(o, S.sat(S.sweep(2.2, 95, 22, 0.12, 0.7), 3.5), 0, 1.2);
+    S.add(o, S.sat(S.sweep(1.2, 180, 50, 0.05, 0.25), 2.5), 0.005, 0.7);
+    const r = S.filt(S.noise(o.length), 'lp', (t) => 1600 * Math.exp(-t / 0.5) + 140, 0.8);
+    for (let i = 0; i < r.length; i++) { const t = i / S.sr; r[i] *= Math.min(1, t / 0.02) * Math.exp(-t / 0.9) * (0.8 + 0.2 * Math.sin(TAU * 6 * t + Math.sin(t * 23))); }
+    S.add(o, r, 0, 1.0);
+    S.add(o, S.grains(2.8, 260, 700, 5000, 0.0005, 0.003, (rr) => 0.03 + rr * rr * 2.6, 3), 0, 0.45);
+    return o;
+  }, 2);
+  put('tinnitus', () => {
+    const o = S.buf(2.0);
+    for (let i = 0; i < o.length; i++) { const t = i / S.sr; const e = Math.min(1, t / 0.08) * Math.exp(-t / 0.8); o[i] = (Math.sin(TAU * 3400 * t) * 0.7 + Math.sin(TAU * 3412 * t) * 0.3) * e; }
+    return o;
+  }, 1);
+
   // 화면
   put('click', () => { const o = S.modal(0.06, [[rnd(1800, 2000), 1, 0.01], [3900, 0.3, 0.006]]); return o; }, 2);
   put('buy', () => { const o = S.buf(0.5); S.add(o, S.modal(0.4, [[1567, 0.8, 0.12], [3134, 0.3, 0.06]]), 0, 0.6); S.add(o, S.modal(0.4, [[2093, 0.8, 0.15], [4186, 0.3, 0.07]]), 0.07, 0.6); S.add(o, thudCore(160, 2000, 0), 0, 0.15); return o; }, 1);
@@ -485,6 +664,24 @@ function ambientBuffers(S) {
   return loops;
 }
 
+// 모으는 동안 도는 소리(기술마다). 이어 붙인 자리가 안 들리게 끝을 처음에 겹쳐 둠.
+// 음 높이는 1.2초에 딱 맞아떨어지는 값만 써서 이음매에서 위상이 안 어긋나게 함
+function chargeLoops(S) {
+  const L = {};
+  const mk = (sec, fn) => { const a = fn(sec + 0.25); const n = Math.floor(0.25 * S.sr); for (let i = 0; i < n; i++) { const k = i / n; a[i] = a[i] * k + a[a.length - n + i] * (1 - k); } return S.norm(a.subarray(0, a.length - n), 0.85); };
+  const N = (d) => Math.floor(d * S.sr);
+  L.shock = mk(1.2, (d) => { const n = N(d), lo = S.filt(S.noise(n), 'lp', 180, 0.9), air = S.filt(S.noise(n), 'bp', 2400, 0.9), o = new Float32Array(n); for (let i = 0; i < n; i++) { const t = i / S.sr; o[i] = lo[i] * (0.8 + 0.2 * Math.sin(TAU * 5 * t)) + air[i] * 0.1 + Math.sin(TAU * 110 * t) * 0.18; } return o; });
+  L.sonic = mk(1.2, (d) => { const n = N(d), w = S.filt(S.noise(n), 'bp', 1500, 7), w2 = S.filt(S.noise(n), 'bp', 2600, 5), lo = S.filt(S.noise(n), 'lp', 400, 0.8), o = new Float32Array(n); for (let i = 0; i < n; i++) { const t = i / S.sr; o[i] = w[i] * 0.9 * (0.7 + 0.3 * Math.sin(TAU * 10 * t)) + w2[i] * 0.4 + lo[i] * 0.5; } return o; });
+  L.barrage = mk(1.2, (d) => { const n = N(d), b = S.filt(S.noise(n), 'bp', 900, 1.2), lo = S.filt(S.noise(n), 'lp', 300, 0.8), o = new Float32Array(n); for (let i = 0; i < n; i++) { const t = i / S.sr, ph = (t * 25) % 1; o[i] = b[i] * Math.exp(-ph / 0.18) + lo[i] * 0.4; } return o; });
+  L.twist = mk(1.2, (d) => { const n = N(d), w = S.filt(S.noise(n), 'bp', (t) => 900 + 600 * Math.sin(TAU * 6.6667 * t), 1.6), o = new Float32Array(n); let ph = 0; for (let i = 0; i < n; i++) { const t = i / S.sr; ph += 110 / S.sr; o[i] = w[i] * (0.55 + 0.45 * Math.sin(TAU * 6.6667 * t)) * 0.9 + ((ph % 1) * 2 - 1) * 0.12; } return S.filt(o, 'lp', 3500, 0.7); });
+  L.frost = mk(1.2, (d) => { const o = S.buf(d); S.add(o, S.grains(d, 260, 3500, 9500, 0.0002, 0.0009, null, 4), 0, 0.7); const w = S.filt(S.noise(o.length), 'bp', 700, 1.5); for (let i = 0; i < w.length; i++) { const t = i / S.sr; w[i] *= 0.6 + 0.4 * Math.sin(TAU * 1.6667 * t); } S.add(o, w, 0, 0.5); for (let k = 0; k < 10; k++) S.add(o, S.modal(0.3, [[rnd(2500, 6000), 1, 0.05]]), rnd(0, d - 0.3), rnd(0.1, 0.25)); return o; });
+  L.fire = mk(1.2, (d) => { const n = N(d), r = S.filt(S.noise(n), 'lp', 520, 0.8), h = S.filt(S.noise(n), 'bp', 1800, 0.8), o = new Float32Array(n); for (let i = 0; i < n; i++) { const t = i / S.sr; o[i] = r[i] * (0.75 + 0.25 * Math.sin(TAU * 3.3333 * t + Math.sin(TAU * 0.8333 * t) * 2)) + h[i] * 0.15; } S.add(o, S.grains(d, 70, 900, 4200, 0.0008, 0.003, null, 3), 0, 0.8); return o; });
+  L.gravity = mk(1.2, (d) => { const n = N(d), lo = S.filt(S.noise(n), 'lp', 120, 0.8), mid = S.filt(S.noise(n), 'bp', 420, 2), o = new Float32Array(n); for (let i = 0; i < n; i++) { const t = i / S.sr; o[i] = (Math.sin(TAU * 50 * t) * 0.5 + Math.sin(TAU * 52.5 * t) * 0.45 + Math.sin(TAU * 100 * t) * 0.2 + lo[i] * 0.6 + mid[i] * 0.25 * (0.5 + 0.5 * Math.sin(TAU * 3.3333 * t))) * (0.75 + 0.25 * Math.sin(TAU * 1.6667 * t)); } return S.sat(o, 1.6); });
+  L.bolt = mk(1.2, (d) => { const n = N(d), o = new Float32Array(n); let ph = 0; for (let i = 0; i < n; i++) { ph += 120 / S.sr; o[i] = Math.tanh(((ph % 1) * 2 - 1) * 3) * 0.35; } const cr = S.filt(S.noise(n), 'hp', 2600, 0.7); for (let i = 0; i < n; i++) cr[i] *= Math.random() < 0.03 ? 1.4 : 0.06; S.add(o, cr, 0, 0.8); return S.filt(o, 'lp', 7000, 0.7); });
+  L.final = mk(1.2, (d) => { const n = N(d), r = S.filt(S.noise(n), 'lp', 700, 0.8), o = new Float32Array(n); let p1 = 0, p2 = 0, p3 = 0; for (let i = 0; i < n; i++) { const t = i / S.sr; p1 += 55 / S.sr; p2 += 220 / S.sr; p3 += 330.8333 / S.sr; o[i] = r[i] * 0.7 * (0.8 + 0.2 * Math.sin(TAU * 4.1667 * t)) + Math.sin(TAU * p1) * 0.4 + ((p2 % 1) * 2 - 1) * 0.08 + ((p3 % 1) * 2 - 1) * 0.06; } S.add(o, S.grains(d, 60, 900, 4000, 0.0008, 0.003, null, 3), 0, 0.5); return S.filt(S.sat(o, 1.5), 'lp', 6000, 0.7); });
+  return L;
+}
+
 // 녹음 펀치 base64(16비트 PCM) → Float32
 function pcm16(b64) {
   const s = atob(b64), n = s.length >> 1, out = new Float32Array(n);
@@ -503,6 +700,7 @@ export class SFX {
     this.ready = false; this.pendingAmb = null;
     this._lastPowerAt = -10;
     this.SR = 44100;
+    this.charges = { L: null, R: null };
   }
   // 불러오는 동안 미리 합성(첫 타격 때 멈칫하지 않게)
   async prepare() {
@@ -511,6 +709,8 @@ export class SFX {
     this.raw = design(S);
     await new Promise((r) => setTimeout(r, 0));
     this.rawAmb = ambientBuffers(S);
+    await new Promise((r) => setTimeout(r, 0));
+    this.rawLoops = chargeLoops(S);
     try {
       this.rawPunch = { heavy: PUNCH.heavy.map(pcm16), medium: PUNCH.medium.map(pcm16) };
     } catch (e) { console.warn('punch', e); this.rawPunch = null; }
@@ -523,11 +723,14 @@ export class SFX {
       const c = this.ctx;
       // 믹스: 전체 → 부드러운 압축(공격 시간을 둬서 타격 첫머리는 살림) → 리미터(겹쳐도 안 찢어지게)
       this.master = c.createGain(); this.master.gain.value = this.muted ? 0 : 0.9;
+      // 대폭발 뒤 귀가 먹먹해지는 거름망(평소엔 다 통과) + 거름망을 안 거치는 귀 울림 통로
+      this.muf = c.createBiquadFilter(); this.muf.type = 'lowpass'; this.muf.frequency.value = 20000; this.muf.Q.value = 0.7;
+      this.dry = c.createGain(); this.dry.gain.value = this.muted ? 0 : 0.9;
       this.comp = c.createDynamicsCompressor();
       this.comp.threshold.value = -16; this.comp.knee.value = 8; this.comp.ratio.value = 2.6; this.comp.attack.value = 0.012; this.comp.release.value = 0.16;
       this.lim = c.createDynamicsCompressor();
       this.lim.threshold.value = -1.5; this.lim.knee.value = 0; this.lim.ratio.value = 20; this.lim.attack.value = 0.001; this.lim.release.value = 0.07;
-      this.master.connect(this.comp); this.comp.connect(this.lim); this.lim.connect(c.destination);
+      this.master.connect(this.muf); this.muf.connect(this.comp); this.dry.connect(this.comp); this.comp.connect(this.lim); this.lim.connect(c.destination);
       // 짧은 방 울림
       this.verb = c.createConvolver();
       const L = Math.floor(c.sampleRate * 0.32), pre = Math.floor(c.sampleRate * 0.006), ir = c.createBuffer(2, L, c.sampleRate);
@@ -545,12 +748,61 @@ export class SFX {
       }
       this.amb = {};
       for (const [k, a] of Object.entries(this.rawAmb)) { const b = c.createBuffer(1, a.length, SR); b.copyToChannel(a, 0); this.amb[k] = b; }
+      this.loopB = {};
+      for (const [k, a] of Object.entries(this.rawLoops || {})) { const b = c.createBuffer(1, a.length, SR); b.copyToChannel(a, 0); this.loopB[k] = b; }
       this.ready = true;
       if (this.pendingAmb) this.ambience(this.pendingAmb);
     }
-    if (this.ctx.state === 'suspended' && this.ctx.resume) { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); }
+    if ((this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') && this.ctx.resume) { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); }
   }
-  setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.9; }
+  setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.9; if (this.dry) this.dry.gain.value = m ? 0 : 0.9; }
+  // 다른 앱·탭으로 가면 소리를 통째로 멈춤(배경음·모으는 소리까지). 돌아오면 다시 켬
+  suspend() {
+    this.chargeStop('L', 0.01); this.chargeStop('R', 0.01);
+    if (this.ctx && this.ctx.state === 'running' && this.ctx.suspend) { const p = this.ctx.suspend(); if (p && p.catch) p.catch(() => {}); }
+  }
+  resume() {
+    if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed' && this.ctx.resume) { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); }
+  }
+  // 모으는 동안 도는 소리: 0.46초에 걸쳐 커지고 음이 올라감
+  chargeStart(side, id) {
+    if (!this.ready || !this.loopB) return;
+    this.chargeStop(side, 0.01);
+    const buf = this.loopB[id] || this.loopB.shock;
+    if (!buf) return;
+    const c = this.ctx, now = c.currentTime;
+    const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+    const g = c.createGain();
+    const vol = { shock: 0.32, sonic: 0.42, barrage: 0.5, twist: 0.5, frost: 0.55, fire: 0.6, gravity: 0.75, bolt: 0.42, final: 0.8 }[id] ?? 0.5;
+    g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(vol, now + 0.46);
+    src.playbackRate.setValueAtTime(0.72, now); src.playbackRate.linearRampToValueAtTime(1.0, now + 0.46);
+    let out = g;
+    if (c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = side === 'L' ? -0.3 : 0.3; g.connect(p); out = p; }
+    src.connect(g); out.connect(this.master);
+    src.start(now);
+    this.charges[side] = { src, g };
+    this.play('rise', 0.32, { pan: side === 'L' ? -0.3 : 0.3, jitter: 0.05 });
+  }
+  chargeStop(side, fade = 0.08) {
+    const h = this.charges && this.charges[side];
+    if (!h) return;
+    this.charges[side] = null;
+    try {
+      const now = this.ctx.currentTime;
+      h.g.gain.cancelScheduledValues(now); h.g.gain.setValueAtTime(h.g.gain.value, now); h.g.gain.linearRampToValueAtTime(0, now + fade);
+      h.src.stop(now + fade + 0.03);
+    } catch (e) {}
+  }
+  // 대폭발 직후 잠깐 귀가 먹먹해졌다가 돌아옴
+  muffle(sec = 1.3) {
+    if (!this.muf) return;
+    const f = this.muf.frequency, now = this.ctx.currentTime;
+    f.cancelScheduledValues(now); f.setValueAtTime(20000, now);
+    f.setValueAtTime(20000, now + 0.12);
+    f.exponentialRampToValueAtTime(560, now + 0.28);
+    f.setValueAtTime(560, now + sec * 0.5);
+    f.exponentialRampToValueAtTime(20000, now + sec);
+  }
   // opts: rate, jitter, delay, verb(false면 울림 없음), verbAmt, pan(-1 왼쪽 ~ 1 오른쪽)
   play(name, vol = 1, opts = {}) {
     if (!this.ready || !this.B[name] || !this.B[name].length) return;
@@ -562,7 +814,7 @@ export class SFX {
     src.connect(g);
     let out = g;
     if (opts.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, opts.pan)); g.connect(p); out = p; }
-    out.connect(this.master);
+    out.connect(opts.dry ? this.dry : this.master);
     if (opts.verb !== false) { const s = c.createGain(); s.gain.value = opts.verbAmt ?? 1; g.connect(s); s.connect(this.verb); }
     src.start(c.currentTime + (opts.delay || 0));
   }
