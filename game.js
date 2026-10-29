@@ -261,7 +261,7 @@ class Fist {
     this.s = 0;              // 뻗은 정도: 0 가드 ~ 1 벽에 닿음
     this.u = 0; this.s0 = 0; this.dur = STRIKE_T; this.wind = 0; this.slow = false;
     this.queue = 0; this.autoPunch = false; this.pendingChain = null; this.hold = 0;
-    this.stuckTaps = 0; this.stuckT = 0; this.pinT = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
+    this.stuckT = 0; this.stuckFor = 0; this.pinT = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
     this.flinchUntil = 0;
     this.tug = 0; this.tremble = 0;
     this.lastPress = -9;
@@ -281,7 +281,7 @@ class Fist {
     const st = this.state;
     if (mode !== 'play' || !round || round.ended) return;
     if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return; }
-    if (st === 'stuck') { onTug(this, now); return; }
+    if (st === 'stuck') { this.queue = 1; return; }
     if (st === 'pinned') { onTug(this, now); return; }
     // 연타 입력은 한 번 예약하되, 주먹이 가드까지 완전히 돌아온 뒤에만 다시 내지른다.
     if (st === 'idle') {
@@ -295,8 +295,8 @@ class Fist {
     const st = this.state;
     if (mode !== 'play' || !round || round.ended || this.inputHeld) return false;
     if (!this.arm.canPunch()) { this.flickV += 1.6; sfx.play('stumpTwitch', 0.2); return false; }
-    // 박히거나 꿰인 팔은 길게 누르기보다 기존처럼 누르는 즉시 한 번 버둥거린다.
-    if (st === 'stuck' || st === 'pinned') { onTug(this, now); return false; }
+    // 마지막 가시벽만 눌러 뜯어낸다. 못·냉동 벽은 자동 회수 뒤 다음 입력을 이어받는다.
+    if (st === 'pinned') { onTug(this, now); return false; }
     this.inputHeld = true;
     this.chargeStart = -1;
     this.queue = 0;
@@ -354,7 +354,7 @@ class Fist {
     if (a.scrap && a.scrap.lumpHP > 0) s *= 0.78;
     return s;
   }
-  update(dt, now) {
+  update(dt, now, rdt = dt) {
     switch (this.state) {
       case 'out': {
         this.u = Math.min(1, this.u + dt / this.dur);
@@ -372,11 +372,13 @@ class Fist {
         }
         break;
       }
-      case 'stuck': case 'pinned': {
-        if (this.state === 'pinned') { this.pinT -= dt; if (this.pinT <= 0) release(this, now, true); }
-        if (this.state === 'stuck') { this.stuckT += dt; if (this.stuckT > 2.6) release(this, now, true); }
+      case 'stuck': {
+        // 접촉감은 잠깐 남기고 자동으로 뜯겨 나온다. 히트스톱·슬로모션이 대기를 늘리지 않는다.
+        this.stuckT += rdt;
+        if (this.stuckT >= this.stuckFor) release(this, now, true);
         break;
       }
+      case 'pinned': break; // 마지막 가시벽: 같은 쪽을 눌러야 빠진다.
       case 'spasm': {
         // 감전: 살짝 튕겨 나왔다가 혼자 다시 꽂힘
         this.spasmT -= dt;
@@ -627,8 +629,8 @@ function onImpact(fist, now) {
     if (fist.barrage > 0) { fist.state = 'rush'; fist.rushT = fist.rushT0 = 0.026; }
     else { fist.rushing = false; fist.aimOff.set(0, 0, 0); fist.state = 'spasm'; fist.spasm = 0; fist.spasmT = fist.spasmT0 = 0.05; }
   }
-  else if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckTaps = react.taps || 3; fist.stuckT = 0; showHint('stuck'); }
-  else if (react.stick === 'pinned') { fist.state = 'pinned'; fist.pinT = react.pin || 2; fist.stuckTaps = 99; showHint('pinned'); }
+  else if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckT = 0; fist.stuckFor = react.releaseAfter || 0.28; showHint('stuck'); }
+  else if (react.stick === 'pinned') { fist.state = 'pinned'; fist.pinT = react.pin || 2; showHint('pinned'); }
   else if (react.spasm && !fist.autoPunch) { fist.state = 'spasm'; fist.spasm = react.spasm; fist.spasmT = fist.spasmT0 = 0.06; }
   else if (fist.autoPunch && fist.spasm > 0) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.07; }
   else if (fist.autoPunch) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.05; }
@@ -683,7 +685,7 @@ function scrapBreakFx(a, res, contact) {
   round.scrapParts += n;
 }
 
-// 박힌 손 빼기(못·냉동) / 꿰인 팔 버둥(꼬챙이)
+// 마지막 가시벽에 꿰인 팔을 눌러 뜯어내기
 function onTug(fist, now) {
   const a = fist.arm;
   fist.tug = 1;
@@ -698,10 +700,7 @@ function onTug(fist, now) {
   dropCrushed(a);
   camTug(a.side);
   vibrate(14);
-  if (fist.state === 'stuck') {
-    fist.stuckTaps--;
-    if (fist.stuckTaps <= 0) release(fist, now, false);
-  } else if (fist.state === 'pinned') {
+  if (fist.state === 'pinned') {
     fist.pinT -= 0.45;
     if (fist.pinT <= 0) release(fist, now, false);
   }
@@ -1028,7 +1027,7 @@ function step(dt, rdt = dt) {
   for (const s of ['L', 'R']) {
     const f = fists[s], A = arms[s];
     f.tremble = fear;
-    if (mode === 'play') f.update(dt, time);
+    if (mode === 'play') f.update(dt, time, rdt);
     f.feel(rdt);
     f.pose(_pos);
     A.root.position.copy(_pos.position);

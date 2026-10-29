@@ -92,8 +92,8 @@ export class UI {
   hint(id) {
     const txt = {
       controls: touch ? '짧게 누르면 타격 · 길게 눌렀다 떼면 모아치기' : 'F · J를 짧게 누르면 타격 · 길게 눌렀다 떼면 모아치기',
-      stuck: '손이 박혔습니다. 같은 쪽을 연달아 눌러 빼세요',
-      pinned: '팔이 꿰였습니다. 같은 쪽을 눌러 버둥거리면 빨리 빠집니다',
+      stuck: '잠깐 붙었다가 저절로 떨어집니다',
+      pinned: '팔이 꿰였습니다. 같은 쪽을 연달아 눌러 빼세요',
     }[id];
     if (!txt) return;
     this.say(txt);

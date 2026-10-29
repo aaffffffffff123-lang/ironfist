@@ -11,11 +11,11 @@ export const WALLS = [
   { id: 'cement', name: '시멘트 벽', desc: '기본 벽.', mult: 1.0, dmg: 0.0115, scrapDmg: 8, pace: 0.44, space: 0.35, fear: 0.0, kind: {} },
   { id: 'gravel', name: '자갈 박힌 벽', desc: '울퉁불퉁. 칠 때마다 살갗이 갈려 나감.', mult: 1.6, dmg: 0.0135, scrapDmg: 9, pace: 0.375, space: 0.3, fear: 0.15, kind: { abr: 0.45 } },
   { id: 'glass', name: '소주병 조각 벽', desc: '유리가 손에 박힌 채 남고, 박힌 데서 피가 계속 새서 팔이 저절로 닳음.', mult: 3.4, dmg: 0.0150, scrapDmg: 10, pace: 0.28, space: 0.28, fear: 0.45, kind: { cut: 0.75, punct: 1 } },
-  { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 꿰여 안 빠짐. 같은 쪽을 몇 번 눌러 뜯어내야 함.', mult: 5.6, dmg: 0.0160, scrapDmg: 11, pace: 0.45, space: 0.35, fear: 0.6, kind: { punct: 3 } },
+  { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 걸렸다가 잠깐 뒤 뜯겨 나옴.', mult: 5.6, dmg: 0.0160, scrapDmg: 11, pace: 0.45, space: 0.35, fear: 0.6, kind: { punct: 3 } },
   { id: 'freezer', name: '냉동창고 벽', desc: '언 쇠에 살이 쩍 들러붙음. 뗄 때 가죽이 벗겨짐.', mult: 6.6, dmg: 0.0170, scrapDmg: 10, pace: 0.38, space: 0.3, fear: 0.6, kind: {} },
   { id: 'hotplate', name: '달군 철판', desc: '살이 눌어붙어 탐. 데인 손은 다음 주먹이 한 박자 늦게 나감.', mult: 9.0, dmg: 0.0185, scrapDmg: 12, pace: 0.28, space: 0.23, fear: 0.75, kind: { burn: 0.45 } },
   { id: 'electric', name: '전기 벽', desc: '감전되면 팔이 경련하며 혼자 몇 대 더 침.', mult: 15.5, dmg: 0.0200, scrapDmg: 14, pace: 0.085, space: 0.072, fear: 0.9, kind: { elec: 0.55 } },
-  { id: 'spikes', name: '쇠꼬챙이 가시벽', desc: '주먹을 뚫고 팔뚝까지 꿰여 그 팔을 몇 초 못 씀.', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
+  { id: 'spikes', name: '쇠꼬챙이 가시벽', desc: '주먹을 뚫고 팔뚝까지 꿰임. 같은 쪽을 눌러 뜯어내야 함.', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
 ];
 // 가시벽에 먼저 다녀간 사람이 남긴 고철 주먹이 꿰여 있는 꼬챙이 자리(벽 좌표)
 export const OLD_FIST_AT = { x: -0.0975, y: 0.135 };
@@ -695,10 +695,10 @@ class NailWall extends WallBase {
   }
   impact(fist, arm, c) {
     const who = hitter(arm);
-    if (who === 'scrap') return { stick: 'stuck', taps: 2, dmgMul: 1.1 };
+    if (who === 'scrap') return { stick: 'stuck', releaseAfter: 0.24, dmgMul: 1.1 };
     if (who === 'pipe') return { dmgMul: 1 };
-    if (who === 'stump') { stumpWound(arm, 4, 1, 0.03); return { stick: 'stuck', taps: 2, dmgMul: 1.1 }; }
-    return { stick: 'stuck', taps: 3, dmgMul: 1.1 };
+    if (who === 'stump') { stumpWound(arm, 4, 1, 0.03); return { stick: 'stuck', releaseAfter: 0.24, dmgMul: 1.1 }; }
+    return { stick: 'stuck', releaseAfter: 0.24, dmgMul: 1.1 };
   }
   tug(fist, arm) { if (hitter(arm) !== 'scrap') this.ctx.fx.tearBits(arm, this, 3); }
   release(fist, arm, c) {
@@ -727,8 +727,8 @@ class FreezerWall extends WallBase {
   }
   impact(fist, arm, c) {
     const who = hitter(arm);
-    if (who === 'scrap' || who === 'pipe') return { stick: 'stuck', taps: 1 };
-    return { stick: 'stuck', taps: 2 };
+    if (who === 'scrap' || who === 'pipe') return { stick: 'stuck', releaseAfter: 0.30 };
+    return { stick: 'stuck', releaseAfter: 0.30 };
   }
   tug(fist, arm) { this.ctx.fx.frostPuff(arm, 6); }
   release(fist, arm, c) {

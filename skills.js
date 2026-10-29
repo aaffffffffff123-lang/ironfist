@@ -838,7 +838,6 @@ export class SkillFX {
     S.charging = false; S.full = false; S.striking = true; S.launchK = k; S.k = 0;
     this.sfx.chargeStop?.(side, 0.03);
     const pan = side === 'L' ? -0.3 : 0.3;
-    const full = k >= 0.95;
     switch (id) {
       case 'sonic': this.sfx.play('lSonic', 0.35 + 0.98 * k, { pan, jitter: 0.018, verb: false, dry: true }); this.coneOwner = side; break;
       case 'barrage': this.sfx.play('flurry', 0.8, { pan, jitter: 0.05 }); break;
@@ -847,7 +846,7 @@ export class SkillFX {
       case 'bolt': this.sfx.play('zap', 0.5, { pan }); break;
       case 'final':
         this.sfx.play('lFinal', 0.9, { pan: pan * 0.5, jitter: 0.02 });
-        if (full) { this.slow.scale = 0.3; this.slow.hold = 9; this.slow.ease = 0; }
+        // 내지르는 속도는 그대로 두고 슬로모션은 접촉 순간에만 건다.
         break;
     }
   }
@@ -1089,7 +1088,7 @@ export class SkillFX {
     const big = full ? 1 : 0.55 + 0.4 * k;
     if (full) {
       this.over.bang('#fffaf0', 1, 0.03, 0.06);
-      this.slow.scale = 0.33; this.slow.hold = 0.62; this.slow.ease = 0.45;
+      this.slow.scale = 0.6; this.slow.hold = 0.10; this.slow.ease = 0.08;
       this.sfx.muffle?.(1.3);
       this.sfx.play('tinnitus', 0.2, { verb: false, dry: true, jitter: 0, delay: 0.14 });
     } else {
@@ -1139,9 +1138,8 @@ export class SkillFX {
   // 연출 시간은 히트스톱에 안 멈춤(세상이 멈춘 사이 충격이 터져 나감). 대폭발 슬로모션에는 같이 느려짐
   update(dt, rdt, time) {
     this.rt += rdt;
-    // 느린 화면 — 대폭발을 내지르다 판이 끝나는 등 맞지 않고 끝나면 바로 풀림
+    // 접촉 순간만 짧게 늦춘 뒤 원래 속도로 복귀한다.
     const sl = this.slow;
-    if (sl.hold > 5 && !this.S.L.striking && !this.S.R.striking) { sl.hold = 0; sl.ease = 0.2; }
     if (sl.hold > 0) { sl.hold -= rdt; this._timeScale = sl.scale; }
     else if (sl.scale < 1) {
       sl.ease = Math.max(0.05, sl.ease);
