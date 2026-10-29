@@ -185,24 +185,23 @@ function design(S) {
   }, 4);
 
   // 대장간 망치가 모루를 때리는 소리. 통처럼 울리는 저역을 쓰지 않고,
-  // 접촉 순간의 날카로운 파열 뒤 비정수 금속 공명과 먼 반사음이 길게 남는다.
+  // 접촉 순간의 날카로운 파열 뒤 비정수 금속 공명과 먼 반사음이 짧게 퍼진다.
   put('forgeHit', () => {
-    const o = S.buf(2.35);
+    const o = S.buf(1.2);
     const edge = S.filt(S.noise(Math.floor(0.012 * S.sr)), 'hp', 2800, 0.65);
     S.add(o, S.mul(edge, S.envExp(edge.length, 0.00002, 0.0015)), 0, 1.0);
     const bite = S.filt(S.noise(Math.floor(0.035 * S.sr)), 'bp', rnd(1500, 2100), 1.35);
     S.add(o, S.mul(bite, S.envExp(bite.length, 0.00005, 0.006)), 0, 0.75);
     const f = rnd(330, 380);
-    const ring = S.modal(2.05, [
-      [f, 0.12, rnd(0.085, 0.115)],
-      [f * 2.68, 0.78, rnd(0.62, 0.78)],
-      [f * 4.91, 0.48, rnd(0.4, 0.55)],
-      [f * 7.37, 0.24, rnd(0.22, 0.32)],
-      [f * 11.15, 0.1, rnd(0.1, 0.16)],
+    const ring = S.modal(1.05, [
+      [f, 0.1, rnd(0.055, 0.08)],
+      [f * 2.68, 0.76, rnd(0.3, 0.38)],
+      [f * 4.91, 0.46, rnd(0.2, 0.28)],
+      [f * 7.37, 0.22, rnd(0.12, 0.18)],
+      [f * 11.15, 0.09, rnd(0.06, 0.1)],
     ], 0.00008);
     S.add(o, ring, 0.0003, 0.9);
-    S.add(o, ring, 0.13, 0.2);
-    S.add(o, ring, 0.34, 0.09);
+    S.add(o, ring, 0.14, 0.12);
     return S.filt(S.sat(o, 1.15), 'hp', 240, 0.7);
   }, 4);
   put('mountLock', () => {
@@ -854,14 +853,14 @@ export class SFX {
   titleImpact() {
     if (this._titleImpactPlayed) return;
     this._titleImpactPlayed = true;
-    this.play('forgeHit', 1.08, { jitter: 0.012, verbAmt: 0.9 });
+    this.play('forgeHit', 1.08, { jitter: 0.012, verbAmt: 0.55 });
   }
   // 장착 프레스는 터무니없이 강하고, 공개된 철권만 뒤늦게 초라한 소리를 낸다.
   equip(kind, side = 'L') {
     const pan = side === 'L' ? -0.32 : 0.32;
     this.play('mountLock', 0.55, { pan, rate: 1, jitter: 0.015, verbAmt: 0.22 });
-    this.play('forgeHit', 1.0, { pan, delay: 0.055, rate: 1, jitter: 0.012, verbAmt: 0.78 });
-    this.play('forgeHit', 0.9, { pan, delay: 0.3, rate: 0.96, jitter: 0.012, verbAmt: 0.82 });
+    this.play('forgeHit', 1.0, { pan, delay: 0.055, rate: 1, jitter: 0.012, verbAmt: 0.5 });
+    this.play('forgeHit', 0.9, { pan, delay: 0.3, rate: 0.96, jitter: 0.012, verbAmt: 0.54 });
     const cheap = {
       base: ['clank', 0.18, 0.86],
       wire: ['wire', 0.24, 1.12],
@@ -870,7 +869,7 @@ export class SFX {
       canchain: ['clank', 0.23, 1.56],
       cutlery: ['ping', 0.22, 1.7],
     }[kind] || ['clank', 0.18, 1.0];
-    this.play(cheap[0], cheap[1], { pan, delay: 1.08, rate: cheap[2], jitter: 0.035, verbAmt: 0.18 });
+    this.play(cheap[0], cheap[1], { pan, delay: 0.78, rate: cheap[2], jitter: 0.035, verbAmt: 0.18 });
   }
   // 휘두르는 바람 — 주먹이 벽에 닿는 순간(dur 초 뒤)에 가장 커지게
   whoosh(side, dur, vol = 0.3) {
