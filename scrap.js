@@ -78,6 +78,11 @@ function rodBetween(a, b, radius, mat, sides = 8) {
   return m;
 }
 
+function curvedRod(points, radius, mat, sides = 6) {
+  const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.45);
+  return new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(18, points.length * 10), radius, sides, false), mat);
+}
+
 function buildCache() {
   const C = {};
   C.nut = ext(hexShape(0.0085, 0.0045), 0.007);
@@ -223,12 +228,14 @@ export class Scrap {
     this.group = new THREE.Group();
     arm.attach.forearm.add(this.group);
     const C = CACHE, M = C.mat;
+    const previewKind = new URLSearchParams(location.search).get('scrapPreview') || '';
+    this.previewKind = previewKind;
     // 붙이는 자리: 그루터기 끝(cutZ) → 원래 손목(0.004)까지는 쇠파이프
     const stumpZ = Math.min(arm.cutZ, 0.006);
     const wristZ = 0.004;
     this.pipe = null;
     let pipeHP = 0;
-    if (stumpZ < -0.012) {
+    if (stumpZ < -0.012 && previewKind !== 'canchain') {
       const len = wristZ - stumpZ + 0.02;
       const pipe = new THREE.Mesh(C.pipeUnit, M.rust);
       pipe.scale.set(1, len, 1); pipe.rotation.x = Math.PI / 2;
@@ -255,8 +262,6 @@ export class Scrap {
     const lump = new THREE.Group();
     lump.position.set(0, -0.004, 0.050);
     this.group.add(lump); this.lump = lump;
-    const previewKind = new URLSearchParams(location.search).get('scrapPreview') || '';
-    this.previewKind = previewKind;
     const keep = (o) => {
       o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       lump.add(o); this.parts.push(o); return o;
@@ -286,27 +291,59 @@ export class Scrap {
         m.rotation.set(rng() * 2, rng() * 2, rng() * 2);
       }
     } else if (previewKind === 'umbrella') {
-      // 천은 사라지고 뼈만 활짝 펴진 우산. 정면에선 거미줄, 옆에선 뒤집힌 얕은 원뿔로 읽힌다.
-      const hub = new THREE.Vector3(0, 0, 0.050), slider = new THREE.Vector3(0, 0, -0.008);
-      const shaft = keep(rodBetween(new THREE.Vector3(0, 0, -0.034), new THREE.Vector3(0, 0, 0.074), 0.0025, M.black, 10));
-      shaft.userData.previewRole = 'umbrella-shaft';
-      const cap = keep(new THREE.Mesh(new THREE.ConeGeometry(0.0055, 0.015, 10), M.rust));
-      cap.rotation.x = Math.PI / 2; cap.position.z = 0.079;
-      const slideRing = keep(new THREE.Mesh(new THREE.TorusGeometry(0.008, 0.0018, 6, 18), M.galv));
-      slideRing.position.copy(slider);
-      for (let i = 0; i < 10; i++) {
-        const a = i / 10 * Math.PI * 2 + 0.05;
-        const broken = i === 7, rMid = 0.034 + (i % 2) * 0.002;
-        const rOut = broken ? 0.078 : 0.063 + (i % 3) * 0.002;
-        const mid = new THREE.Vector3(Math.cos(a) * rMid, Math.sin(a) * rMid, 0.025);
-        const out = new THREE.Vector3(Math.cos(a) * rOut, Math.sin(a) * rOut, broken ? -0.020 : 0.001 - (i % 2) * 0.003);
-        const rib = new THREE.Group();
-        rib.add(rodBetween(hub, mid, 0.00155, i % 4 === 0 ? M.galv : M.rust, 7));
-        rib.add(rodBetween(mid, out, 0.00145, i % 4 === 0 ? M.galv : M.rust, 7));
-        rib.add(rodBetween(slider, mid, 0.00115, M.black, 6));
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.0027, 7, 5), M.brass); joint.position.copy(mid); rib.add(joint);
-        rib.userData.previewRole = 'umbrella-rib'; keep(rib);
+      // 완벽한 방사형 장식이 아니라, 러너와 경첩으로 접히는 실제 우산 뼈대가 망가진 상태.
+      const frame = new THREE.Group(); frame.rotation.set(0.20, -0.17, 0.08); frame.position.set(0.005, -0.003, 0);
+      frame.userData.previewRole = 'umbrella-frame';
+      const addFrame = (o, role) => {
+        if (role) o.userData.previewRole = role;
+        o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+        frame.add(o); return o;
+      };
+      const polar = (r, z, a) => new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, z);
+      const shaft = addFrame(rodBetween(new THREE.Vector3(0, 0, -0.046), new THREE.Vector3(0, 0, 0.083), 0.0022, M.black, 9), 'umbrella-shaft');
+      const topNotch = addFrame(new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), M.rust), 'umbrella-notch');
+      topNotch.rotation.x = Math.PI / 2; topNotch.position.z = 0.054;
+      const runner = addFrame(new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.011, 10), M.galv), 'umbrella-runner');
+      runner.rotation.x = Math.PI / 2; runner.position.z = -0.009;
+      for (const z of [-0.015, -0.003]) {
+        const collar = addFrame(new THREE.Mesh(new THREE.TorusGeometry(0.0074, 0.0011, 5, 16), M.black)); collar.position.z = z;
       }
+      const crown = new THREE.Vector3(0, 0, 0.054);
+      const jitter = [-0.08, 0.04, -0.03, 0.09, -0.05, 0.02, 0.07, -0.06];
+      for (let i = 0; i < 8; i++) {
+        const a = i / 8 * Math.PI * 2 + jitter[i], bend = (i % 3 - 1) * 0.055;
+        let shoulder = polar(0.016, 0.047, a);
+        let hinge = polar(0.036 + (i % 2 ? 0.003 : -0.001), 0.026, a + bend);
+        let tip = polar(0.064 + (i % 3 - 1) * 0.004, -0.003 - (i % 2) * 0.003, a + bend * 1.7);
+        if (i === 1) { hinge = polar(0.035, 0.027, a - 0.04); tip = polar(0.050, 0.066, a - 0.12); }
+        if (i === 5) { hinge = polar(0.029, 0.030, a + 0.08); tip = polar(0.031, 0.012, a + 0.20); }
+        if (i === 7) { hinge = polar(0.039, 0.020, a + 0.08); tip = polar(0.079, -0.036, a + 0.26); }
+        const rib = new THREE.Group(); rib.userData.previewRole = 'umbrella-main-rib';
+        const mat = i % 3 === 0 ? M.galv : M.rust;
+        rib.add(curvedRod([crown, shoulder, hinge], 0.00135, mat, 6));
+        if (i === 7) {
+          const dir = tip.clone().sub(hinge).normalize(), brokenStart = hinge.clone().addScaledVector(dir, 0.009);
+          rib.add(rodBetween(brokenStart, tip, 0.00125, M.rust, 6));
+          const hanging = rodBetween(hinge.clone().add(new THREE.Vector3(0, 0, -0.004)), hinge.clone().add(new THREE.Vector3(0.006, -0.004, -0.020)), 0.0010, M.black, 6);
+          hanging.userData.previewRole = 'umbrella-broken-link'; rib.add(hanging);
+        } else rib.add(rodBetween(hinge, tip, 0.00125, mat, 6));
+        const tangent = new THREE.Vector3(-Math.sin(a), Math.cos(a), 0).multiplyScalar(0.0007);
+        const pin = rodBetween(hinge.clone().sub(tangent), hinge.clone().add(tangent), 0.0030, M.brass, 8);
+        pin.userData.previewRole = 'umbrella-hinge'; rib.add(pin);
+        if (i !== 5) {
+          const eye = polar(0.006, -0.008, a), stretcher = new THREE.Group(); stretcher.userData.previewRole = 'umbrella-stretcher';
+          if (i === 2) {
+            const d = hinge.clone().sub(eye), p1 = eye.clone().addScaledVector(d, 0.45), p2 = eye.clone().addScaledVector(d, 0.55);
+            stretcher.add(rodBetween(eye, p1, 0.00095, M.black, 6), rodBetween(p2, hinge, 0.00095, M.black, 6));
+          } else if (i === 7) {
+            const d = hinge.clone().sub(eye), stop = eye.clone().addScaledVector(d, 0.78);
+            stretcher.add(rodBetween(eye, stop, 0.00095, M.black, 6));
+          } else stretcher.add(rodBetween(eye, hinge, 0.00095, M.black, 6));
+          rib.add(stretcher);
+        }
+        addFrame(rib);
+      }
+      keep(frame);
     } else if (previewKind === 'tape') {
       // 줄자가 나가는 게 아니라 줄자 몸통 자체가 날아간다.
       this.launchesBody = true;
@@ -320,46 +357,46 @@ export class Scrap {
       const lock = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.007, 0.006), M.canRed); lock.position.set(-0.012, 0.030, 0.010); lock.rotation.z = -0.12;
       body.add(shell, spool, hubCap, grip, mouth, lock); body.position.z = 0.003; keep(body);
       this.tapeBody = body;
-      this.tapeAnchor = new THREE.Vector3(0, -0.031, 0.012);
-      this.tapeBodyExit = new THREE.Vector3(-0.002, -0.031, -0.010);
+      this.tapeAnchor = new THREE.Vector3(0, -0.035, 0.012);
+      this.tapeBodyExit = new THREE.Vector3(0, -0.031, -0.010);
       this.tapeStrip = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), M.mustard);
       this.tapeStrip.userData.previewRole = 'tape-strip'; this.tapeStrip.castShadow = true;
       this.group.add(this.tapeStrip);
       this.previewLaunch = null;
+      this.launchDrive = 0; this.launchWorldDelta = new THREE.Vector3();
+      this._launchLocal = new THREE.Vector3(); this._launchForward = new THREE.Vector3();
       this.setLaunch(0, new THREE.Vector3(0, 0, 0));
     } else if (previewKind === 'canchain') {
-      // 캔을 면으로 두르지 않고, 찌그러진 원통 다섯 개를 척추처럼 한 줄로 겨우 잇는다.
-      const pts = [
-        new THREE.Vector3(-0.018, -0.068, -0.004), new THREE.Vector3(-0.026, -0.036, 0.002),
-        new THREE.Vector3(-0.014, -0.002, 0.012), new THREE.Vector3(0.004, 0.032, 0.020),
-        new THREE.Vector3(-0.004, 0.068, 0.030), new THREE.Vector3(0.017, 0.103, 0.038),
-      ];
-      const canMats = [M.rust, M.galv, M.canRed, M.rust, M.brass];
+      // 파이프 끝 장식이 아니라, 그루터기부터 타격면까지 캔 일곱 개가 팔 자체를 대신한다.
+      const z0 = stumpZ - lump.position.z + 0.004, z1 = 0.098 - lump.position.z;
+      const wobble = [[0, -0.002], [0.006, -0.006], [-0.004, 0.004], [0.007, -0.004], [-0.006, 0.005], [0.004, -0.002], [-0.003, 0.003], [0.002, 0]];
+      const pts = wobble.map(([x, y], i) => new THREE.Vector3(x, y, z0 + (z1 - z0) * i / (wobble.length - 1)));
+      const canMats = [M.rust, M.galv, M.canRed, M.rust, M.brass, M.galv, M.rust];
       for (let i = 0; i < pts.length - 1; i++) {
-        const d = new THREE.Vector3().subVectors(pts[i + 1], pts[i]), fullLen = d.length(), len = Math.max(0.022, fullLen - 0.0035);
+        const d = new THREE.Vector3().subVectors(pts[i + 1], pts[i]), fullLen = d.length(), len = Math.max(0.026, fullLen - 0.004);
         const can = new THREE.Group(); can.position.copy(pts[i]).add(pts[i + 1]).multiplyScalar(0.5);
         can.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
-        can.scale.set(1 + (i % 2) * 0.09, i === 2 ? 0.88 : 1, 0.82 + (i % 3) * 0.07);
-        const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.0155 + (i % 2) * 0.0015, 0.0145 + (i % 3) * 0.001, len, 14, 2, true), canMats[i]);
+        can.scale.set(1 + (i % 2) * 0.08, i === 3 ? 0.90 : 1, 0.84 + (i % 3) * 0.07);
+        const radius = 0.018 + (i % 3) * 0.0017;
+        const shell = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * (0.92 + (i % 2) * 0.05), len, 14, 2, true), canMats[i]);
         shell.rotation.y = (i - 2) * 0.08; can.add(shell);
         for (const y of [-len / 2, len / 2]) {
-          const rim = new THREE.Mesh(new THREE.TorusGeometry(0.0152, 0.0014, 5, 16), i === 1 ? M.brass : M.galv);
+          const rim = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.98, 0.0016, 5, 16), i === 1 || i === 5 ? M.brass : M.galv);
           rim.rotation.x = Math.PI / 2; rim.position.y = y; can.add(rim);
         }
-        if (i === 1 || i === 4) {
-          const dark = new THREE.Mesh(new THREE.CircleGeometry(0.0135, 16), M.black);
+        if (i === 1) {
+          const dark = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.86, 16), M.black);
+          dark.rotation.x = Math.PI / 2; dark.position.y = -len / 2 - 0.0002; can.add(dark);
+        }
+        if (i === pts.length - 2) {
+          const dark = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.86, 16), M.black);
           dark.rotation.x = -Math.PI / 2; dark.position.y = len / 2 + 0.0002; can.add(dark);
         }
         if (i === 3) {
-          const lid = new THREE.Mesh(new THREE.CircleGeometry(0.0145, 16), M.galv);
+          const lid = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.93, 16), M.galv);
           lid.rotation.set(-Math.PI / 2 + 0.65, 0.18, -0.15); lid.position.set(0.008, len / 2 + 0.006, -0.003); can.add(lid);
         }
         can.userData.previewRole = 'can-segment'; keep(can);
-        if (i < pts.length - 2) {
-          const knot = keep(new THREE.Mesh(new THREE.TorusGeometry(0.010, 0.0012, 5, 14), i % 2 ? M.copper : M.wire));
-          knot.position.copy(pts[i + 1]); knot.rotation.set(Math.PI / 2 + i * 0.11, 0.15, i * 0.2);
-          knot.userData.previewRole = 'can-joint';
-        }
       }
     } else if (previewKind === 'saw') {
       // 모터도 회전도 없이, 주먹 면에 너무 큰 톱날 한 장이 비뚤게 박혀 있다.
@@ -590,13 +627,23 @@ export class Scrap {
     if (previewKind === 'bolt') this.glow.scale.set(0.68, 0.68, 1.2);
     else if (previewKind === 'kitchen') this.glow.scale.set(1.0, 0.82, 0.96);
     else if (previewKind === 'umbrella') this.glow.scale.set(0.46, 0.46, 0.68);
-    else if (previewKind === 'canchain') this.glow.scale.set(0.48, 1.45, 0.62);
+    else if (previewKind === 'canchain') this.glow.scale.set(0.48, 0.48, 1.6);
     else if (previewKind === 'cutlery') this.glow.scale.set(0.48, 0.34, 0.85);
     else if (previewKind === 'saw') this.glow.scale.set(0.78, 0.78, 0.62);
     else this.glow.scale.set(0.95, 0.8, 1.05);
     lump.add(this.glow);
   }
   // 줄자 몸통포: 팔의 이동량을 몸통에 넘기고, 손목과 몸통 사이의 얇은 줄자 띠만 늘인다.
+  setLaunchAlongArm(k, deltaWorld) {
+    if (!this.launchesBody || !deltaWorld) return;
+    this.group.updateWorldMatrix(true, false);
+    this._launchForward.set(0, 0, 1).transformDirection(this.group.matrixWorld);
+    const e = this.group.matrixWorld.elements;
+    const zScale = Math.hypot(e[8], e[9], e[10]) || 1;
+    const sign = this._launchForward.dot(deltaWorld) >= 0 ? 1 : -1;
+    this._launchLocal.set(0, 0, sign * deltaWorld.length() / zScale);
+    this.setLaunch(k, this._launchLocal);
+  }
   setLaunch(k, deltaLocal) {
     if (!this.launchesBody || !this.lumpBase || !this.tapeStrip) return;
     const t = Math.max(0, Math.min(1.04, Number.isFinite(k) ? k : 0));
