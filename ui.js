@@ -87,7 +87,7 @@ export class UI {
     return k;
   }
   goalFull(g) {
-    this.say(g.kind === 'wall' ? '참을성이 다 찼습니다. 이 판이 끝나면 다음 벽이 열립니다' : '참을성이 다 찼습니다. 이 판이 끝나면 양손이 새로 생깁니다', 4200);
+    this.say(g.kind === 'wall' ? '참을성을 길렀습니다. 이 판이 끝나면 다음 벽이 열립니다' : '참을성을 길렀습니다. 이 판이 끝나면 양손이 새로 생깁니다', 4200);
   }
   hint(id) {
     const txt = {
