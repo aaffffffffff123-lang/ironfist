@@ -19,7 +19,6 @@ export const SKILLS = [
   { id: 'twist', wall: 'nails', name: '회오리', kind: { fractBoost: 0.07 } },
   { id: 'frost', wall: 'freezer', name: '냉기', kind: { frost: 0.78 } },
   { id: 'fire', wall: 'hotplate', name: '화염', kind: { burn: 1.0 } },
-  { id: 'gravity', wall: 'slime', name: '중력', kind: { fractBoost: 0.06 } },
   { id: 'bolt', wall: 'electric', name: '번개', kind: { elec: 1.0 } },
   { id: 'final', wall: 'spikes', name: '대폭발', kind: { burn: 0.85, elec: 0.75, abr: 0.5, fractBoost: 0.06 } },
 ];
