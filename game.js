@@ -28,6 +28,9 @@ const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 40960];
 const HANDS_SPAN = 31040;            // 벽이 다 열린 뒤로는 이만큼 쌓일 때마다 새 손
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
+const PULL_T = 0.095;                // 일반타 준비: 누른 순간부터 뒤로 당기는 실제 시간
+const PULL_DEPTH = 0.070;            // 카메라 쪽으로 당기는 거리(대기 위치는 유지)
+const TAP_STRIKE_T = 0.072;          // 당김을 끝낸 뒤에는 짧고 빠르게 내지름
 const BACK_T = 0.2;                  // 벽에서 튕겨 가드로 돌아오는 시간
 const HOLD_T = 0.012;                // 멈춤이 풀린 뒤 벽에 붙어 있는 시간
 const HS_SLOW = 0.03;                // 멈춤(히트스톱) 동안 시간 흐름 배율
@@ -176,13 +179,8 @@ function poses(side, armObj) {
 }
 
 // ------------------------------------------------------------------ 동작 곡선
-// 일반타: 앞 40% 동안 확실히 당긴 뒤 가속해 꽂는다. 접촉까지 걸리는 시간은 그대로다.
-function strikeCurve(u, wind) {
-  if (!wind) return Math.pow(u, 2.1);
-  const turn = 0.4, pull = 0.22;
-  if (u < turn) return -pull * smooth(u / turn);
-  return -pull + (1 + pull) * Math.pow((u - turn) / (1 - turn), 1.65);
-}
+// 당김은 별도 준비 단계에서 끝낸다. 전진 중에는 다시 물러나지 않고 가속한다.
+function strikeCurve(u) { return Math.pow(u, 2.1); }
 // 튕겨 나오기: 처음이 가장 빠르고, 가드 자리를 살짝 지나쳤다 돌아옴
 function reboundCurve(u) { const c1 = 1.15, c3 = c1 + 1, v = u - 1; return 1 + c3 * v * v * v + c1 * v * v; }
 
@@ -261,7 +259,8 @@ class Fist {
   resetMotion() {
     this.state = 'idle';
     this.s = 0;              // 뻗은 정도: 0 가드 ~ 1 벽에 닿음
-    this.u = 0; this.s0 = 0; this.dur = STRIKE_T; this.wind = 0; this.slow = false;
+    this.u = 0; this.s0 = 0; this.dur = STRIKE_T; this.slow = false;
+    this.prep = 0; this.prep0 = 0;
     this.queue = 0; this.autoPunch = false; this.pendingChain = null; this.hold = 0;
     this.stuckT = 0; this.stuckFor = 0; this.pinT = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
     this.flinchUntil = 0;
@@ -316,7 +315,7 @@ class Fist {
     if (started >= 0 && this.state === 'idle' && now >= this.flinchUntil) {
       const held = Math.max(0, realNow - started);
       const charge = held <= CHARGE_START ? 0 : clamp((held - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1);
-      this.startPunch(now, smooth(charge));
+      this.startPunch(now, smooth(charge), held);
       return;
     }
     // 회수 중에 눌렀다가 가드로 돌아오기 전에 뗐으면 기존처럼 일반타 한 번만 예약한다.
@@ -327,13 +326,25 @@ class Fist {
     this.chargeStart = -1;
     skillFx?.chargeCancel(this.arm.side);
   }
-  startPunch(now, charge = 0) {
+  startPunch(now, charge = 0, held = 0) {
+    // 누르는 동안 이미 당긴 만큼 이어받는다. 짧은 탭도 준비 자세를 건너뛰지 않는다.
+    const ordinary = !this.autoPunch && charge <= 0 && this.s < 0.15;
+    if (ordinary && held < PULL_T) {
+      this.state = 'windup'; this.s0 = this.s; this.u = 0;
+      this.dur = PULL_T - Math.max(0, held);
+      this.prep0 = this.prep = smooth(clamp(held / PULL_T, 0, 1));
+      this.punchCharge = 0; this.skillLaunch = null;
+      return;
+    }
+    this.launchPunch(now, charge, this.autoPunch ? 0 : 1);
+  }
+  launchPunch(now, charge = 0, prep = 0) {
     this.state = 'out';
     this.s0 = this.s; this.u = 0;
     this.punchCharge = this.autoPunch ? 0 : clamp(charge, 0, 1);
-    this.wind = !this.autoPunch && this.punchCharge <= 0 && this.s < 0.15 ? 1 : 0;
+    this.prep = prep;
     // 덜 돌아온 데서 다시 치면 거리가 짧은 만큼 빨리 닿음
-    this.dur = (this.autoPunch ? 0.07 : STRIKE_T) * (0.45 + 0.55 * clamp(1 - this.s0, 0, 1.1)) / this.speed();
+    this.dur = (this.autoPunch ? 0.07 : this.punchCharge > 0 ? STRIKE_T : TAP_STRIKE_T) * (0.45 + 0.55 * clamp(1 - this.s0, 0, 1.1)) / this.speed();
     if (this.rushing) this.dur = 0.036;
     this.skillLaunch = null;
     if (this.punchCharge > 0 && skillFx) {
@@ -356,12 +367,30 @@ class Fist {
     if (a.scrap && a.scrap.lumpHP > 0) s *= 0.78;
     return s;
   }
+  advanceOut(dt, now) {
+    this.u = Math.min(1, this.u + dt / this.dur);
+    this.s = this.s0 + (1 - this.s0) * strikeCurve(this.u);
+    if (this.u >= 1) { this.s = 1; this.state = 'hit'; this.hold = HOLD_T; onImpact(this, now); }
+  }
   update(dt, now, rdt = dt) {
     switch (this.state) {
+      case 'windup': {
+        // 당김은 실제 시간으로 흘러, 반대손의 히트스톱 중에도 누른 손이 즉시 반응한다.
+        const left = (1 - this.u) * this.dur;
+        this.u = Math.min(1, this.u + rdt / this.dur);
+        const k = smooth(this.u);
+        this.prep = this.prep0 + (1 - this.prep0) * k;
+        this.s = this.s0 * (1 - k);
+        if (rdt >= left) {
+          this.s = 0;
+          this.launchPunch(now, 0, 1);
+          // 낮은 프레임에서도 당김 끝에 빈 프레임을 끼우지 않는다.
+          this.advanceOut(Math.max(0, rdt - left) * (rdt > 0 ? dt / rdt : 0), now);
+        }
+        break;
+      }
       case 'out': {
-        this.u = Math.min(1, this.u + dt / this.dur);
-        this.s = this.s0 + (1 - this.s0) * strikeCurve(this.u, this.wind);
-        if (this.u >= 1) { this.s = 1; this.state = 'hit'; this.hold = HOLD_T; onImpact(this, now); }
+        this.advanceOut(dt, now);
         break;
       }
       case 'hit': {
@@ -463,25 +492,27 @@ class Fist {
     // 휘두르는 호
     out.position.y += Math.sin(sc * Math.PI) * 0.018;
     out.quaternion.slerpQuaternions(P.q0, P.q1, sc);
-    // 충전은 화면 오라가 아니라 실제 자세로 먼저 읽힌다: 더 깊은 당김, 손목 긴장, 미세한 떨림.
-    if ((this.inputHeld && this.chargeStart >= 0 && this.state === 'idle') || (this.state === 'out' && this.punchCharge > 0)) {
+    // 누르는 순간의 당김·짧은 탭 준비·모아치기 발사에 같은 자세를 써서 손을 뗄 때 튀지 않게 한다.
+    const holding = this.inputHeld && this.chargeStart >= 0 && this.state === 'idle';
+    const winding = this.state === 'windup';
+    if (holding || winding || (this.state === 'out' && this.prep > 0)) {
       const launching = this.state === 'out';
-      const held = launching ? CHARGE_FULL : Math.max(0, realSeconds() - this.chargeStart);
-      const prep = launching ? 1 : smooth(clamp(held / CHARGE_START, 0, 1));
-      const charge = launching ? this.punchCharge : smooth(clamp((held - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1));
+      const held = holding ? Math.max(0, realSeconds() - this.chargeStart) : 0;
+      const prep = holding ? smooth(clamp(held / PULL_T, 0, 1)) : this.prep;
+      const charge = launching ? this.punchCharge : holding ? smooth(clamp((held - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1)) : 0;
       // 손을 놓은 첫 프레임에도 당긴 자세를 유지한 뒤 전진 초반에 풀어, 순간이동처럼 보이는 끊김을 없앤다.
-      const launchFade = launching ? 1 - smooth(clamp(this.u / 0.55, 0, 1)) : 1;
-      const pull = (prep * 0.012 + charge * 0.034) * launchFade;
+      const launchFade = launching ? 1 - smooth(clamp(this.u / 0.75, 0, 1)) : 1;
+      const pull = (prep * PULL_DEPTH + charge * 0.034) * launchFade;
       const sg = this.arm.side === 'L' ? -1 : 1;
       out.position.addScaledVector(P.D1, -pull);
-      out.position.x += sg * charge * 0.006 * launchFade;
-      out.position.y -= charge * 0.007 * launchFade;
-      tmpQ.setFromAxisAngle(AX_X, -(0.05 * prep + 0.13 * charge) * launchFade); out.quaternion.multiply(tmpQ);
+      out.position.x -= sg * pull * 0.60;
+      out.position.y += pull * 0.75;
+      tmpQ.setFromAxisAngle(AX_X, -(0.16 * prep + 0.13 * charge) * launchFade); out.quaternion.multiply(tmpQ);
       const sk = skillFx ? skillFx.skill.id : 'shock';
       // 힘을 억지로 붙들고 있는 느낌: 완충에 가까울수록 팔 전체와 손목이 함께 떨린다.
       // 발사 중에는 곧게 뻗는 선이 흐려지지 않게 즉시 끈다.
       const tremK = sk === 'barrage' ? 2.7 : sk === 'final' ? 2.4 : sk === 'sonic' ? 1.8 : 1.4;
-      const trem = launching ? 0 : prep * 0.0004 + charge * charge * 0.0021 * tremK;
+      const trem = !holding ? 0 : prep * 0.0004 + charge * charge * 0.0021 * tremK;
       out.position.x += Math.sin(rtime * (sk === 'barrage' ? 97 : 53) + (sg < 0 ? 0 : 2.1)) * trem;
       out.position.y += Math.sin(rtime * (sk === 'barrage' ? 89 : 47) + 0.8) * trem * 0.7;
       out.position.z += Math.sin(rtime * 71 + (sg < 0 ? 1.4 : 3.5)) * trem * 0.55;
@@ -491,19 +522,11 @@ class Fist {
         tmpQ.setFromAxisAngle(AX_Z, Math.sin(rtime * 73 + (sg < 0 ? 0 : 1.7)) * wrist * 0.65); out.quaternion.multiply(tmpQ);
       }
       // 회오리: 모으는 동안 팔을 반대로 감았다가, 내지를 때 한 바퀴 비틀며 나감
-      if (sk === 'twist') {
+      if (sk === 'twist' && charge > 0) {
         const W = 1.15;
         const ang = launching ? -W * this.punchCharge + (TAU + W * this.punchCharge) * smooth(this.u) : -W * charge;
         tmpQ.setFromAxisAngle(AX_Z, ang * (sg < 0 ? 1 : -1)); out.quaternion.multiply(tmpQ);
       }
-    }
-    // 당길 때 화면 안쪽·위로 모아, 카메라 쪽으로 가까워져도 주먹이 아래·옆으로 사라지지 않게 한다.
-    // 회수 곡선도 가드를 잠깐 지나치므로, 이 보정은 직접 내지르는 일반타에만 적용한다.
-    if (this.state === 'out' && this.wind && s < 0) {
-      const pull = clamp(-s / 0.22, 0, 1);
-      out.position.x += (this.arm.side === 'L' ? 1 : -1) * 0.014 * pull;
-      out.position.y += 0.026 * pull;
-      tmpQ.setFromAxisAngle(AX_X, -0.16 * pull); out.quaternion.multiply(tmpQ);
     }
     // 손목 튕김: 맞고 나서 주먹이 들리며 팔이 휨
     if (this.flick) { tmpQ.setFromAxisAngle(AX_X, this.flick); out.quaternion.multiply(tmpQ); }
