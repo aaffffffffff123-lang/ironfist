@@ -7,20 +7,48 @@
   --forge-panel: #202429;
 }
 
-/* Keep the room light; the title and metal controls sit in front of it. */
+/* 타이틀은 게임보다 먼저 한 번 기선을 제압한다. */
 #title {
-  padding-top: calc(10vh + env(safe-area-inset-top));
+  isolation: isolate;
+  overflow: hidden;
+  padding-top: calc(6vh + env(safe-area-inset-top));
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(155, 55, 17, .34), transparent 36%),
+    linear-gradient(180deg, #171b20 0%, #0b0e11 64%, #050607 100%);
+}
+#title::before {
+  z-index: -2;
+  background:
+    linear-gradient(105deg, transparent 0 34%, rgba(255, 255, 255, .035) 34.2% 34.7%, transparent 35% 100%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 7px),
+    radial-gradient(circle at 50% 42%, transparent 0 32%, rgba(0, 0, 0, .64) 78%);
+}
+#title::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: -12%;
+  right: -12%;
+  top: 51%;
+  height: 3px;
+  opacity: .75;
+  background: linear-gradient(90deg, transparent, #7f2b13 12%, #ff9a45 48%, #ffc489 50%, #ff762f 52%, #7f2b13 88%, transparent);
+  box-shadow: 0 0 12px rgba(255, 112, 41, .65), 0 0 42px rgba(255, 74, 20, .25);
+  transform: rotate(-2deg) scaleX(.88);
+  transform-origin: center;
+  pointer-events: none;
 }
 .logo {
   display: block;
   flex: 0 0 auto;
-  width: min(88vw, 510px);
+  width: min(94vw, 640px);
   margin: 0;
   padding: 0;
   font-size: 0;
   line-height: 0;
   letter-spacing: 0;
-  filter: drop-shadow(0 7px 6px rgba(37, 26, 17, .16));
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, .92)) drop-shadow(0 14px 18px rgba(0, 0, 0, .68)) drop-shadow(0 0 17px rgba(255, 91, 32, .22));
+  will-change: transform, filter;
 }
 .logo img {
   display: block;
@@ -32,36 +60,79 @@
   user-select: none;
 }
 .logo::after { content: none; }
+.titleStamp {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(74vw, 400px);
+  gap: 10px;
+  margin-top: -2px;
+  color: #c1c6ca;
+  font: 900 10px/1 var(--font);
+  letter-spacing: .23em;
+  text-shadow: 0 1px 2px #000;
+}
+.titleStamp i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, #555c63, #ff7d35, #555c63);
+  box-shadow: 0 0 7px rgba(255, 113, 48, .5);
+}
 .tbtns {
-  margin-top: clamp(18px, 4vh, 32px);
+  margin-top: clamp(22px, 4.5vh, 38px);
   gap: 12px;
 }
-.tbtns > .btn { min-width: 174px; }
+.tbtns > .btn { min-width: 210px; }
 
-/* Wide, quiet steel faces; heat belongs to the edges and primary actions. */
+#title.intro .logo { animation: titleForgeIn .62s cubic-bezier(.12, .8, .18, 1) both; }
+#title.intro .titleStamp { animation: stampIn .45s .32s ease-out both; }
+#title.intro::after { animation: seamIgnite .72s .1s ease-out both; }
+#title.breach .logo { animation: titleHammer .33s cubic-bezier(.2, .8, .2, 1) both; }
+#title.breach::after { animation: seamStrike .33s ease-out both; }
+#title.breach .tbtns, #title.breach .titleStamp { opacity: 0; transform: translateY(9px); transition: opacity .12s, transform .18s; }
+@keyframes titleForgeIn {
+  0% { opacity: 0; transform: translateY(-34px) scale(1.12); filter: brightness(2.4) blur(3px); }
+  42% { opacity: 1; transform: translateY(9px) scale(.975); filter: brightness(1.6) blur(0); }
+  61% { transform: translateY(-3px) scale(1.012); }
+  100% { transform: none; }
+}
+@keyframes stampIn { from { opacity: 0; transform: scaleX(.55); } to { opacity: 1; transform: none; } }
+@keyframes seamIgnite { 0% { opacity: 0; transform: rotate(-2deg) scaleX(.08); } 46% { opacity: 1; } 100% { opacity: .75; transform: rotate(-2deg) scaleX(.88); } }
+@keyframes titleHammer {
+  0% { transform: none; }
+  28% { transform: translateY(13px) scale(1.035); filter: brightness(2.2) drop-shadow(0 0 26px rgba(255, 116, 49, .9)); }
+  55% { transform: translateY(-4px) scale(.995); }
+  100% { transform: none; }
+}
+@keyframes seamStrike { 0% { opacity: .75; } 25% { opacity: 1; height: 7px; box-shadow: 0 0 30px #ff8b3f, 0 0 90px #ff3c12; } 100% { opacity: 0; transform: rotate(-2deg) scaleX(1.15); } }
+
+/* 두꺼운 프레스 스위치처럼 눌리는 강철 버튼. */
 .btn {
-  border: 1px solid #7a828b;
-  border-radius: 7px;
-  background: linear-gradient(180deg, #f2f3f3 0%, #c8cdd2 47%, #a1a9b1 48%, #c4cad0 100%);
-  color: #181c20;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -1px 0 rgba(37, 42, 47, .45), 0 3px 0 #41474e, 0 6px 12px rgba(0, 0, 0, .18);
+  border: 2px solid #747c84;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #4c535a 0%, #24292e 48%, #171b1f 52%, #30363c 100%);
+  color: #f3f5f6;
+  letter-spacing: .07em;
+  text-shadow: 0 2px 1px #050607;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), inset 0 -2px 0 rgba(0, 0, 0, .7), 0 4px 0 #090b0d, 0 8px 18px rgba(0, 0, 0, .42);
   transition: filter .15s ease, transform .12s ease, box-shadow .12s ease;
   touch-action: manipulation;
 }
 #btnStart, #btnNext {
-  border-bottom-color: #ed7b28;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -2px 0 #ff9a45, 0 3px 0 #4a3020, 0 6px 14px rgba(0, 0, 0, .2);
+  border-color: #ffad70 #a9471e #7c2b12;
+  background: linear-gradient(180deg, #d85b27 0%, #9c3015 46%, #6c1c0b 51%, #a73517 100%);
+  color: #fff8ef;
+  box-shadow: inset 0 1px 0 rgba(255, 217, 181, .55), inset 0 -2px 0 #3e0d04, 0 4px 0 #260a04, 0 8px 22px rgba(0, 0, 0, .5), 0 0 18px rgba(255, 91, 35, .2);
 }
 .btn:not(:disabled):active {
-  transform: translateY(2px);
-  filter: brightness(.94);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .18), 0 1px 0 #41474e;
+  transform: translateY(4px) scale(.99);
+  filter: brightness(1.12);
+  box-shadow: inset 0 3px 7px rgba(0, 0, 0, .5), 0 0 0 #090b0d;
 }
 .btn.ghost {
   border: 1px solid #646c74;
-  border-radius: 6px;
-  background: linear-gradient(180deg, #424951, #282d33);
+  border-radius: 2px;
+  background: linear-gradient(180deg, #343a40, #171b1f);
   color: #f0f1f2;
   text-shadow: 0 1px 1px #101316;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 2px 0 #171b1e, 0 3px 7px rgba(0, 0, 0, .15);
@@ -82,36 +153,50 @@
 }
 #ctrlHint {
   padding: 0 20px;
-  color: #282a2c;
+  color: #d3d7da;
   line-height: 1.6;
-  opacity: .9;
-  text-shadow: 0 1px 3px #f3f0e9, 0 0 8px #f3f0e9;
+  opacity: .82;
+  text-shadow: 0 2px 3px #000;
 }
 
-/* A dark forged-steel case, with a restrained machined rim. */
+/* 장착실: 거대한 프레스 제어반처럼 진지하지만 안에 다는 것은 고철이다. */
 #shop {
-  background: rgba(19, 21, 24, .44);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: radial-gradient(circle at 50% 20%, rgba(97, 45, 23, .28), transparent 44%), rgba(7, 9, 11, .72);
+  backdrop-filter: blur(6px) saturate(.72);
+  -webkit-backdrop-filter: blur(6px) saturate(.72);
 }
 .sheet {
   position: relative;
   color: var(--forge-text);
-  border: 1px solid #747b82;
-  border-radius: 13px;
-  background: linear-gradient(128deg, rgba(255, 255, 255, .035), transparent 40%), linear-gradient(180deg, #2c3137, #1c2025 68%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 0 0 3px rgba(10, 13, 16, .46), 0 16px 48px rgba(0, 0, 0, .4);
+  border: 2px solid #727981;
+  border-radius: 5px;
+  background:
+    linear-gradient(128deg, rgba(255, 255, 255, .045), transparent 34%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .012) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, #2b3036, #15191d 72%);
+  box-shadow: inset 0 0 0 4px #0b0e11, inset 0 1px 0 5px rgba(255, 255, 255, .09), 0 18px 54px rgba(0, 0, 0, .62), 0 0 0 1px #050607;
+  transform-origin: 50% 58%;
 }
 .sheet::before {
   content: '';
   position: absolute;
   z-index: 1;
   top: 0;
-  right: 18px;
-  left: 18px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #aeb8c1 20%, #f2f3f3 46%, #d6945a 72%, transparent);
+  right: 12px;
+  left: 12px;
+  height: 4px;
+  background: linear-gradient(90deg, #391007, #f05b21 18%, #ffd0a2 50%, #f05b21 82%, #391007);
+  box-shadow: 0 0 12px rgba(255, 91, 33, .6);
   pointer-events: none;
+}
+.sheet.mounting { animation: pressCabinet .66s cubic-bezier(.18, .76, .24, 1); }
+@keyframes pressCabinet {
+  0%, 100% { transform: none; filter: none; }
+  12% { transform: translateY(5px) scale(.992); filter: brightness(1.35); }
+  22% { transform: translateY(-2px) scale(1.002); }
+  39% { transform: none; }
+  47% { transform: translateY(4px) scale(.994); filter: brightness(1.22); }
+  61% { transform: translateY(-1px); }
 }
 .shopBody {
   scrollbar-width: thin;
@@ -158,37 +243,75 @@
 .goal.full #goalFill, #endureBox.full #endureFill {
   background: linear-gradient(180deg, #ffe0a4, #ffab43 48%, #f26b21);
 }
-.sec h3 { color: #f0f1f2; font-size: 16px; }
+.sec h3 {
+  position: relative;
+  padding-left: 13px;
+  color: #f6f7f8;
+  font-size: 17px;
+  letter-spacing: .04em;
+  text-shadow: 0 2px 2px #000;
+}
+.sec h3::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  bottom: 1px;
+  width: 5px;
+  background: linear-gradient(#ffb06f, #bd4018);
+  box-shadow: 0 0 8px rgba(255, 107, 44, .5);
+}
 .arm {
-  border: 1px solid #505861;
-  border-radius: 8px;
-  background: linear-gradient(140deg, #30363d, #24292f 65%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 2px 4px rgba(0, 0, 0, .1);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #5f6871;
+  border-radius: 3px;
+  background: linear-gradient(140deg, #343b42, #20252a 65%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), inset 0 -2px 0 rgba(0, 0, 0, .45), 0 4px 8px rgba(0, 0, 0, .25);
+}
+.arm::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(255, 255, 255, .035);
+  pointer-events: none;
 }
 .armHead b { color: #f2f3f4; }
 .armState { color: #bac2ca; }
 .arm.ready {
-  border-color: #8d7159;
-  background: linear-gradient(140deg, #383a3c, #282b2e 65%);
+  border-color: #9b5a35;
+  background: linear-gradient(140deg, #42352f, #25272a 68%);
+  box-shadow: inset 4px 0 0 #d65320, inset 0 1px 0 rgba(255, 194, 143, .12), 0 4px 8px rgba(0, 0, 0, .28);
 }
 .arm.ready .armState { color: #ffd0a5; }
+.arm.mounting { animation: mountCard .7s cubic-bezier(.16, .8, .22, 1); }
+@keyframes mountCard {
+  0%, 100% { transform: none; }
+  9% { transform: translateY(5px) scale(.975); box-shadow: inset 4px 0 0 #ff7335, 0 0 28px rgba(255, 92, 32, .85); }
+  24% { transform: translateY(-2px) scale(1.012); }
+  38% { transform: none; }
+  45% { transform: translateY(4px) scale(.982); box-shadow: inset 4px 0 0 #ff9b5e, 0 0 22px rgba(255, 92, 32, .62); }
+  63% { transform: translateY(-1px) scale(1.004); }
+}
 .btn.sub {
-  border: 1px solid #bc844f;
-  border-radius: 5px;
-  background: linear-gradient(180deg, #ffd1a0, #eeab6d 47%, #d58b4e 48%, #edac72);
-  color: #2c1b10;
-  text-shadow: 0 1px 0 rgba(255, 240, 215, .45);
-  box-shadow: inset 0 1px 0 rgba(255, 246, 224, .7), 0 2px 0 #644222;
+  border: 2px solid #f39a5e;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #d95a26, #8e2b13 48%, #611807 52%, #9e3015);
+  color: #fff4e9;
+  letter-spacing: .045em;
+  text-shadow: 0 2px 1px #421004;
+  box-shadow: inset 0 1px 0 rgba(255, 222, 191, .45), 0 3px 0 #300c04, 0 6px 12px rgba(0, 0, 0, .25);
 }
 .btn.sub:not(:disabled):active {
-  background: linear-gradient(180deg, #e9af77, #cf8a50);
+  background: linear-gradient(180deg, #f0793f, #7a210d);
 }
 .armReady {
-  border: 1px solid #605c56;
-  border-radius: 5px;
-  background: linear-gradient(180deg, #333538, #292c30);
-  color: #ffd6b2;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  border: 1px solid #77523d;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #37383a, #202327);
+  color: #ffc596;
+  letter-spacing: .035em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), inset 4px 0 0 #b64018;
 }
 .wallPicker { border-color: #464d55; }
 .wallPicker summary {
@@ -236,18 +359,20 @@
   color: #adb7c1;
 }
 .next {
-  border-top: 1px solid #565d65;
-  background: linear-gradient(180deg, #30363c, #20252a);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+  border-top: 2px solid #626a72;
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 119, 48, .05) 0 8px, transparent 8px 16px),
+    linear-gradient(180deg, #2c3238, #15191d);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), 0 -5px 16px rgba(0, 0, 0, .28);
 }
 #nextNote { color: #c1c8cf; }
 
 /* Small in-game instruments share the steel, without covering the room. */
 #sound {
   border: 1px solid #777f87;
-  border-radius: 7px;
-  background: linear-gradient(180deg, #e3e7ea, #a8b0b8);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 2px 4px rgba(0, 0, 0, .2);
+  border-radius: 3px;
+  background: linear-gradient(180deg, #d8dde1, #838b93);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .75), 0 3px 0 #30363c, 0 5px 10px rgba(0, 0, 0, .28);
 }
 #endureBox {
   border: 1px solid #737b84;
@@ -279,7 +404,7 @@
   .btn.sub { padding-right: 4px; padding-left: 4px; }
 }
 @media (max-height: 500px) {
-  #title { padding-top: calc(42px + env(safe-area-inset-top)); }
+  #title { padding-top: calc(18px + env(safe-area-inset-top)); }
   .logo { width: min(72vw, 390px); }
   .logo img { max-height: 36vh; }
   .tbtns { flex-direction: row; gap: 12px; margin-top: 16px; }
@@ -289,5 +414,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .btn, #title, #hud, #shop, .sheet, #hint, #endureFill, #goalFill { transition: none; }
-  #boot .bar i, #endureBox.full #endureFill, #endureBox.flash, #sArms.shake { animation: none; }
+  #boot .bar i, #endureBox.full #endureFill, #endureBox.flash, #sArms.shake, #title.intro .logo, #title.intro .titleStamp, #title.intro::after, #title.breach .logo, #title.breach::after, .sheet.mounting, .arm.mounting { animation: none; }
 }

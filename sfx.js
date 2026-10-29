@@ -184,6 +184,34 @@ function design(S) {
     return S.filt(o, 'lp', 2400, 0.7);
   }, 4);
 
+  // 타이틀·장착 프레스의 대형 쇠망치. 저역 몸통, 짧은 강철 파열음,
+  // 공장 안에서 늦게 돌아오는 공명을 한 타격 안에 겹친다.
+  put('forgeHit', () => {
+    const o = S.buf(1.0);
+    S.add(o, thudCore(rnd(72, 88), rnd(1450, 1850), 0.35), 0, 1.1);
+    S.add(o, S.sat(S.sweep(0.5, rnd(250, 290), rnd(43, 51), 0.014, 0.12), 3.0), 0, 0.9);
+    const crack = S.filt(S.noise(Math.floor(0.032 * S.sr)), 'bp', rnd(2100, 2900), 1.35);
+    S.add(o, S.mul(crack, S.envExp(crack.length, 0.00004, 0.0045)), 0, 0.92);
+    const f = rnd(185, 225);
+    S.add(o, S.modal(0.92, [
+      [f, 0.8, rnd(0.26, 0.34)],
+      [f * rnd(2.35, 2.6), 0.46, rnd(0.16, 0.23)],
+      [f * rnd(4.4, 5.1), 0.23, rnd(0.08, 0.14)],
+      [f * rnd(8.0, 9.2), 0.1, rnd(0.035, 0.065)],
+    ], 0.0002), 0.001, 0.9);
+    const room = S.filt(S.filt(S.noise(Math.floor(0.72 * S.sr)), 'lp', 760, 0.7), 'hp', 45, 0.7);
+    S.add(o, S.mul(room, S.envExp(room.length, 0.004, 0.17)), 0.025, 0.22);
+    return S.sat(o, 1.45);
+  }, 4);
+  put('mountLock', () => {
+    const o = S.buf(0.36);
+    const snap = S.filt(S.noise(Math.floor(0.012 * S.sr)), 'hp', 1800, 0.65);
+    S.add(o, S.mul(snap, S.envExp(snap.length, 0.00003, 0.0018)), 0, 0.72);
+    S.add(o, S.modal(0.32, [[rnd(540, 660), 0.7, 0.08], [rnd(1280, 1550), 0.42, 0.045], [rnd(2700, 3300), 0.18, 0.02]]), 0, 0.75);
+    S.add(o, S.sweep(0.18, rnd(170, 210), rnd(70, 84), 0.025, 0.05), 0.018, 0.5);
+    return S.sat(o, 1.5);
+  }, 3);
+
   // 모아치기 — 일반 타격 위에 얹는 전용 층. 첫머리는 짧고 단단하게,
   // 방 전체 울림은 조금 늦게 와서 접촉과 여진이 한 덩어리로 뭉개지지 않게 한다.
   put('powerCore', () => {
@@ -820,6 +848,30 @@ export class SFX {
     out.connect(opts.dry ? this.dry : this.master);
     if (opts.verb !== false) { const s = c.createGain(); s.gain.value = opts.verbAmt ?? 1; g.connect(s); s.connect(this.verb); }
     src.start(c.currentTime + (opts.delay || 0));
+  }
+  // 자동재생 제한 때문에 페이지 로드 순간이 아니라 첫 '타격 개시' 입력과 정확히 맞춘다.
+  titleImpact() {
+    if (this._titleImpactPlayed) return;
+    this._titleImpactPlayed = true;
+    this.play('forgeHit', 1.08, { jitter: 0.02, verbAmt: 0.75 });
+    this.play('powerRoom', 0.42, { delay: 0.035, rate: 0.72, jitter: 0.02, verbAmt: 0.75 });
+  }
+  // 장착 프레스는 터무니없이 강하고, 공개된 철권만 뒤늦게 초라한 소리를 낸다.
+  equip(kind, side = 'L') {
+    const pan = side === 'L' ? -0.32 : 0.32;
+    this.play('mountLock', 0.78, { pan, rate: 0.92, jitter: 0.025, verbAmt: 0.35 });
+    this.play('forgeHit', 1.0, { pan, delay: 0.055, rate: 0.98, jitter: 0.02, verbAmt: 0.68 });
+    this.play('forgeHit', 0.88, { pan, delay: 0.255, rate: 0.82, jitter: 0.018, verbAmt: 0.7 });
+    this.play('powerRoom', 0.36, { pan, delay: 0.285, rate: 0.68, jitter: 0.02, verbAmt: 0.7 });
+    const cheap = {
+      base: ['clank', 0.18, 0.86],
+      wire: ['wire', 0.24, 1.12],
+      hand: ['ping', 0.18, 0.82],
+      umbrella: ['wire', 0.25, 1.42],
+      canchain: ['clank', 0.23, 1.56],
+      cutlery: ['ping', 0.22, 1.7],
+    }[kind] || ['clank', 0.18, 1.0];
+    this.play(cheap[0], cheap[1], { pan, delay: 0.62, rate: cheap[2], jitter: 0.035, verbAmt: 0.18 });
   }
   // 휘두르는 바람 — 주먹이 벽에 닿는 순간(dur 초 뒤)에 가장 커지게
   whoosh(side, dur, vol = 0.3) {

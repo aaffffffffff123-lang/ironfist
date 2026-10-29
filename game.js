@@ -1266,6 +1266,10 @@ function restoreArm(a, snap) {
 
 // UI에서 부르는 동작들
 const actions = {
+  titleImpact() {
+    sfx.unlock();
+    sfx.titleImpact();
+  },
   start() {
     sfx.unlock();
     if (!arms.L.hasFist() && !arms.R.hasFist()) {
@@ -1291,7 +1295,7 @@ const actions = {
     location.reload();
   },
   selectWall(id) { if (G.owned.includes(id)) { setWall(id); save(); sfx.play('click', 0.5); } },
-  // 고철은 공짜 — 박살나면 또 갈아 끼움
+  // 철권은 공짜 — 박살나면 또 장착함
   scrap(side) {
     const a = arms[side];
     if (a.hasFist()) return false;
@@ -1303,7 +1307,7 @@ const actions = {
     G.scrapEquips = Math.max(0, Number.isFinite(G.scrapEquips) ? Math.floor(G.scrapEquips) : 0) + 1;
     resetArmMotion(side);
     G.arms[side] = armSnapshot(a);
-    save(); sfx.play('scrapOn', 0.9); return true;
+    save(); sfx.equip(kind, side); return kind;
   },
   canStart() { return arms.L.hasFist() || arms.R.hasFist(); },
   goal: () => goal(),

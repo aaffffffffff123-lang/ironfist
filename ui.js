@@ -31,7 +31,16 @@ export class UI {
     this.bind();
   }
   bind() {
-    $('#btnStart').addEventListener('click', () => this.A.start());
+    $('#btnStart').addEventListener('click', () => {
+      if (this._titleStarting) return;
+      this._titleStarting = true;
+      const btn = $('#btnStart');
+      btn.disabled = true;
+      this.el.title.classList.add('breach');
+      this.A.titleImpact();
+      // 브라우저가 소리를 허용한 첫 입력에서 로고를 한 번 찍어 누른 뒤 들어간다.
+      this._titleTimer = setTimeout(() => this.A.start(), 330);
+    });
     $('#btnNew').addEventListener('click', () => { if (confirm('처음부터 다시 할까요? 쌓은 참을성과 열린 벽이 모두 사라집니다.')) this.A.newGame(); });
     this.el.sound.addEventListener('click', (e) => { e.stopPropagation(); const on = this.A.isMuted(); this.A.toggleSound(on); this.syncSound(); });
     $('#btnNext').addEventListener('click', () => {
@@ -44,15 +53,17 @@ export class UI {
   syncSound() { this.el.sound.classList.toggle('off', this.A.isMuted()); }
   ready() {
     const fresh = !this.hadSave || (this.G.stats.rounds === 0 && !(this.G.endure > 0));
-    $('#btnStart').textContent = fresh ? '시작' : '이어하기';
+    $('#btnStart').textContent = fresh ? '타격 개시' : '계속 타격';
     $('#btnNew').style.display = fresh ? 'none' : '';
     this.el.title.inert = false;
     this.el.title.setAttribute('aria-hidden', 'false');
     this.el.title.classList.add('show');
+    requestAnimationFrame(() => this.el.title.classList.add('intro'));
     this.hud(false);
     this.endure(this.A.goal());
   }
   hidePanels() {
+    clearTimeout(this._titleTimer);
     this.el.title.classList.remove('show');
     this.el.title.inert = true;
     this.el.title.setAttribute('aria-hidden', 'true');
@@ -150,20 +161,22 @@ export class UI {
     setBar($('#goalFill'), k, key !== this._shopKey);
     this._shopKey = key;
     $('#goal').classList.toggle('full', k >= 1);
-    // 팔마다 직접 철권을 단다(공짜)
+    // 팔마다 직접 철권을 장착한다(공짜)
     const arms = $('#sArms'); arms.innerHTML = '';
     for (const side of ['L', 'R']) {
       const info = A.armInfo(side), label = side === 'L' ? '왼팔' : '오른팔';
       const card = document.createElement('div');
       card.className = 'arm' + (info.fist ? ' ready' : '');
       card.dataset.side = side;
-      const state = info.scrap ? '철권 장착됨' : info.fist ? (info.I < 0.02 ? '맨손' : '다친 맨손') : '철권 없음';
-      const primary = info.fist ? '<div class="armReady">사용 가능</div>' :
-        `<button class="btn sub" data-act="scrap"><span>${label}에 철권 장착</span></button>`;
+      const state = info.scrap ? '철권 장착 완료' : info.fist ? (info.I < 0.02 ? '맨손 준비' : '손상된 맨손') : '장착 대기';
+      const primary = info.fist ? '<div class="armReady">타격 준비 완료</div>' :
+        '<button class="btn sub" data-act="scrap"><span>철권 장착</span></button>';
       card.innerHTML = `<div class="armHead"><b>${label}</b><span class="armState">${state}</span></div><div class="armBtns">${primary}</div>`;
       card.querySelector('[data-act=scrap]')?.addEventListener('click', () => {
-        if (!A.scrap(side)) this.deny();
+        const kind = A.scrap(side);
+        if (!kind) this.deny();
         this.renderShop();
+        if (kind) this.mountImpact(side);
       });
       arms.appendChild(card);
     }
@@ -195,8 +208,17 @@ export class UI {
     const left = A.armInfo('L').fist, right = A.armInfo('R').fist;
     const btn = $('#btnNext');
     btn.disabled = !A.canStart();
-    btn.textContent = left && right ? '양팔로 다음 판' : left ? '왼팔로 다음 판' : right ? '오른팔로 다음 판' : '철권을 장착하세요';
+    btn.textContent = left && right ? '양팔 타격 개시' : left ? '왼팔 타격 개시' : right ? '오른팔 타격 개시' : '철권 장착 필요';
     $('#nextNote').textContent = left && right ? '' : left || right ? '다른 쪽도 장착하거나, 한쪽만으로 시작하세요.' : '한쪽만 장착해도 시작할 수 있습니다.';
+  }
+  mountImpact(side) {
+    const card = $(`.arm[data-side="${side}"]`), sheet = $('.sheet');
+    if (!card || !sheet) return;
+    card.classList.remove('mounting'); sheet.classList.remove('mounting');
+    void card.offsetWidth;
+    card.classList.add('mounting'); sheet.classList.add('mounting');
+    clearTimeout(this._mountTimer);
+    this._mountTimer = setTimeout(() => { card.classList.remove('mounting'); sheet.classList.remove('mounting'); }, 760);
   }
   deny() { const c = $('#sArms'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake'); }
   toast(t) { const h = this.el.hint; h.textContent = t; h.classList.add('show', 'top'); clearTimeout(this._ht); this._ht = setTimeout(() => h.classList.remove('show', 'top'), 2400); }
