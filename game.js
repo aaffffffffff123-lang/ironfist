@@ -194,6 +194,7 @@ class Spring {
 const cam = {
   trauma: 0,                                         // 흔들림(0~1, 실제 시간으로 잦아듦)
   charge: 0, chargeSide: 0,                         // 충전 중 내 몸 떨림(카메라만, 장면·벽은 안 움직임)
+  afterK: 0, afterT: 9, afterSide: 0,               // 모아치기 접촉 뒤 온몸이 튕기며 남는 여진
   pitch: new Spring(8, 0.42), yaw: new Spring(7, 0.45), roll: new Spring(7.5, 0.42),
   push: new Spring(9, 0.5), fov: new Spring(8, 0.5),
   ph: Array.from({ length: 6 }, () => Math.random() * 100),
@@ -222,6 +223,12 @@ function camPowerKick(side, amount) {
   cam.roll.kick(-sg * (1.75 * k) * D2R);
   cam.push.kick(-(0.016 * k));
   cam.fov.kick(-(5.0 * k));
+  // 순간 반동이 끝난 뒤에도 몸 전체가 충격을 못 이기고 몇 번 후들거린다.
+  // 연속 타격은 세기를 더하되, 반대손이 거의 동시에 닿으면 좌우 쏠림은 서로 상쇄한다.
+  const old = cam.afterK, total = old + k;
+  cam.afterSide = total > 0 ? clamp((cam.afterSide * old + sg * k) / total, -1, 1) : sg;
+  cam.afterK = Math.min(1.25, total);
+  cam.afterT = 0;
 }
 // 박힌 손을 뜯어낼 때 몸이 뒤로 젖혀짐
 function camPull(side) {
@@ -236,6 +243,9 @@ function camTug(side) {
 }
 function camUpdate(rdt) {
   cam.trauma = Math.max(0, cam.trauma - rdt * 2.4);
+  cam.afterT += rdt;
+  cam.afterK *= Math.exp(-rdt / 0.14);
+  if (cam.afterK < 0.002) { cam.afterK = 0; cam.afterT = 9; cam.afterSide = 0; }
   for (const s of CAM_SPRINGS) s.step(rdt);
 }
 
@@ -782,7 +792,9 @@ function newRound() {
   round = blankRound();
   chain = [];
   for (const s of ['L', 'R']) resetArmMotion(s);
-  hitstop = 0; rush = 0; cam.trauma = 0; cam.charge = 0; cam.chargeSide = 0;
+  hitstop = 0; rush = 0;
+  cam.trauma = 0; cam.charge = 0; cam.chargeSide = 0;
+  cam.afterK = 0; cam.afterT = 9; cam.afterSide = 0;
   for (const s of CAM_SPRINGS) s.reset();
   skillFx?.clear();
 }
@@ -1098,12 +1110,20 @@ function render() {
   // 충전 떨림은 장면을 흔들지 않고 카메라 자기 축만 움직인다. 그래서 벽의 지진이 아니라
   // 힘을 붙들고 있는 내 머리·몸이 떠는 시점으로 읽힌다. 후반에 급격히 강해진다.
   const ck = Math.pow(smooth(cam.charge), 1.55), cs = cam.chargeSide;
-  camera.translateX(ck * (0.00065 * nz(1, 59, 83) + cs * 0.00018 * nz(2, 43, 71)));
-  camera.translateY(ck * 0.00072 * nz(0, 53, 79));
-  camera.translateZ(cam.push.x + ck * 0.00082 * nz(2, 47, 73));
-  camera.rotateX(cam.pitch.x + a * 1.0 * D2R * nz(0, 107, 163) + ck * 0.48 * D2R * nz(0, 47, 79));
-  camera.rotateY(cam.yaw.x + a * 0.75 * D2R * nz(1, 97, 151) + ck * (0.36 * nz(1, 53, 83) + cs * 0.08) * D2R);
-  camera.rotateZ(cam.roll.x + a * 1.4 * D2R * nz(2, 113, 173) + ck * (0.72 * nz(2, 61, 89) + cs * 0.12) * D2R);
+  // 접촉 여진도 카메라 로컬축에만 적용한다. 첫 충격으로 앞으로 쏠린 뒤 뒤·옆으로 튕기며 잦아든다.
+  const ak = cam.afterK, at = cam.afterT, as = cam.afterSide;
+  const afterX = ak * (as * 0.0014 * Math.sin(at * 44 + 0.2) + 0.00045 * Math.sin(at * 81 + 0.7));
+  const afterY = ak * 0.0012 * Math.sin(at * 52 + 0.6);
+  const afterZ = ak * 0.0035 * Math.sin(at * 33 + 0.15);
+  const afterPitch = ak * (0.85 * Math.sin(at * 39 + 0.15) + 0.28 * Math.sin(at * 79)) * D2R;
+  const afterYaw = ak * as * 0.7 * Math.sin(at * 43 + 0.1) * D2R;
+  const afterRoll = ak * (as * 1.25 * Math.sin(at * 47 + 0.3) + 0.28 * Math.sin(at * 71)) * D2R;
+  camera.translateX(ck * (0.00065 * nz(1, 59, 83) + cs * 0.00018 * nz(2, 43, 71)) + afterX);
+  camera.translateY(ck * 0.00072 * nz(0, 53, 79) + afterY);
+  camera.translateZ(cam.push.x + ck * 0.00082 * nz(2, 47, 73) + afterZ);
+  camera.rotateX(cam.pitch.x + a * 1.0 * D2R * nz(0, 107, 163) + ck * 0.48 * D2R * nz(0, 47, 79) + afterPitch);
+  camera.rotateY(cam.yaw.x + a * 0.75 * D2R * nz(1, 97, 151) + ck * (0.36 * nz(1, 53, 83) + cs * 0.08) * D2R + afterYaw);
+  camera.rotateZ(cam.roll.x + a * 1.4 * D2R * nz(2, 113, 173) + ck * (0.72 * nz(2, 61, 89) + cs * 0.12) * D2R + afterRoll);
   const fov = baseFov + cam.fov.x - (skillFx ? skillFx.zoom * 7 : 0);
   if (Math.abs(fov - camera.fov) > 1e-4) { camera.fov = fov; camera.updateProjectionMatrix(); }
   // 입자 크기: 화면 높이(픽셀)와 시야각에 맞춤 — 세로 폰 화면(배율 2)에서 예전과 같은 크기
