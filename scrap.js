@@ -45,19 +45,6 @@ function gearShape(r, teeth, hole) {
   const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h);
   return s;
 }
-function sawShape(r, teeth, hole) {
-  const s = new THREE.Shape();
-  for (let i = 0; i <= teeth * 3; i++) {
-    const tooth = Math.floor(i / 3) % teeth, phase = i % 3;
-    const a = (i / (teeth * 3)) * Math.PI * 2;
-    const chipped = tooth === 5 || tooth === 17;
-    const rr = phase === 1 ? r * (chipped ? 0.84 : 1) : r * (phase === 0 ? 0.83 : 0.77);
-    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
-    i ? s.lineTo(x, y) : s.moveTo(x, y);
-  }
-  const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h);
-  return s;
-}
 function ringShape(r, hole) { const s = new THREE.Shape(); s.absarc(0, 0, r, 0, Math.PI * 2, false); const h = new THREE.Path(); h.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(h); return s; }
 const ext = (shape, depth, bevel = 0.0006) => { const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 1, curveSegments: 10 }); g.translate(0, 0, -depth / 2); g.computeVertexNormals(); return g; };
 
@@ -168,7 +155,6 @@ function buildCache() {
   C.giantBoltRod.rotateZ(Math.PI / 2);
   C.giantBoltThread = new THREE.TorusGeometry(0.0117, 0.0009, 4, 12);
   C.giantBoltThread.rotateY(Math.PI / 2);
-  C.sawBlade = ext(sawShape(0.059, 24, 0.011), 0.0042, 0.00035);
   C.mat = {
     rust: metalMat(0x7a6656, 0.55, 0.75, 0.75, 'rust'),
     galv: metalMat(0xb9bec4, 0.4, 1.0, 0.18, 'galv'),
@@ -315,36 +301,36 @@ export class Scrap {
         const collar = addFrame(new THREE.Mesh(new THREE.TorusGeometry(0.0074, 0.0011, 5, 16), M.black)); collar.position.z = z;
       }
       const crown = new THREE.Vector3(0, 0, 0.054);
-      const jitter = [-0.08, 0.04, -0.03, 0.09, -0.05, 0.02, 0.07, -0.06];
-      for (let i = 0; i < 8; i++) {
-        const a = i / 8 * Math.PI * 2 + jitter[i], bend = (i % 3 - 1) * 0.055;
+      const jitter = [-0.08, 0.03, 0.06, -0.04, 0.02, 0.09, -0.06, 0.04, -0.02, 0.07, -0.05, 0.01, 0.08, -0.03, 0.05, -0.07];
+      for (let i = 0; i < 16; i++) {
+        const a = i / 16 * Math.PI * 2 + jitter[i], bend = (i % 3 - 1) * 0.055;
         let shoulder = polar(0.016, 0.047, a);
         let hinge = polar(0.036 + (i % 2 ? 0.003 : -0.001), 0.026, a + bend);
         let tip = polar(0.064 + (i % 3 - 1) * 0.004, -0.003 - (i % 2) * 0.003, a + bend * 1.7);
-        if (i === 1) { hinge = polar(0.035, 0.027, a - 0.04); tip = polar(0.050, 0.066, a - 0.12); }
-        if (i === 5) { hinge = polar(0.029, 0.030, a + 0.08); tip = polar(0.031, 0.012, a + 0.20); }
-        if (i === 7) { hinge = polar(0.039, 0.020, a + 0.08); tip = polar(0.079, -0.036, a + 0.26); }
+        if (i === 2) { hinge = polar(0.035, 0.027, a - 0.04); tip = polar(0.050, 0.066, a - 0.12); }
+        if (i === 10) { hinge = polar(0.029, 0.030, a + 0.08); tip = polar(0.031, 0.012, a + 0.20); }
+        if (i === 14) { hinge = polar(0.039, 0.020, a + 0.08); tip = polar(0.079, -0.036, a + 0.26); }
         const rib = new THREE.Group(); rib.userData.previewRole = 'umbrella-main-rib';
         const mat = i % 3 === 0 ? M.galv : M.rust;
-        rib.add(curvedRod([crown, shoulder, hinge], 0.00135, mat, 6));
-        if (i === 7) {
+        rib.add(curvedRod([crown, shoulder, hinge], 0.00072, mat, 6));
+        if (i === 14) {
           const dir = tip.clone().sub(hinge).normalize(), brokenStart = hinge.clone().addScaledVector(dir, 0.009);
-          rib.add(rodBetween(brokenStart, tip, 0.00125, M.rust, 6));
-          const hanging = rodBetween(hinge.clone().add(new THREE.Vector3(0, 0, -0.004)), hinge.clone().add(new THREE.Vector3(0.006, -0.004, -0.020)), 0.0010, M.black, 6);
+          rib.add(rodBetween(brokenStart, tip, 0.00068, M.rust, 6));
+          const hanging = rodBetween(hinge.clone().add(new THREE.Vector3(0, 0, -0.004)), hinge.clone().add(new THREE.Vector3(0.006, -0.004, -0.020)), 0.00055, M.black, 6);
           hanging.userData.previewRole = 'umbrella-broken-link'; rib.add(hanging);
-        } else rib.add(rodBetween(hinge, tip, 0.00125, mat, 6));
-        const tangent = new THREE.Vector3(-Math.sin(a), Math.cos(a), 0).multiplyScalar(0.0007);
-        const pin = rodBetween(hinge.clone().sub(tangent), hinge.clone().add(tangent), 0.0030, M.brass, 8);
+        } else rib.add(rodBetween(hinge, tip, 0.00068, mat, 6));
+        const tangent = new THREE.Vector3(-Math.sin(a), Math.cos(a), 0).multiplyScalar(0.00055);
+        const pin = rodBetween(hinge.clone().sub(tangent), hinge.clone().add(tangent), 0.0017, M.brass, 8);
         pin.userData.previewRole = 'umbrella-hinge'; rib.add(pin);
-        if (i !== 5) {
+        if (i !== 10) {
           const eye = polar(0.006, -0.008, a), stretcher = new THREE.Group(); stretcher.userData.previewRole = 'umbrella-stretcher';
-          if (i === 2) {
+          if (i === 4) {
             const d = hinge.clone().sub(eye), p1 = eye.clone().addScaledVector(d, 0.45), p2 = eye.clone().addScaledVector(d, 0.55);
-            stretcher.add(rodBetween(eye, p1, 0.00095, M.black, 6), rodBetween(p2, hinge, 0.00095, M.black, 6));
-          } else if (i === 7) {
+            stretcher.add(rodBetween(eye, p1, 0.00050, M.black, 6), rodBetween(p2, hinge, 0.00050, M.black, 6));
+          } else if (i === 14) {
             const d = hinge.clone().sub(eye), stop = eye.clone().addScaledVector(d, 0.78);
-            stretcher.add(rodBetween(eye, stop, 0.00095, M.black, 6));
-          } else stretcher.add(rodBetween(eye, hinge, 0.00095, M.black, 6));
+            stretcher.add(rodBetween(eye, stop, 0.00050, M.black, 6));
+          } else stretcher.add(rodBetween(eye, hinge, 0.00050, M.black, 6));
           rib.add(stretcher);
         }
         addFrame(rib);
@@ -382,19 +368,6 @@ export class Scrap {
         }
         can.userData.previewRole = 'can-segment'; keep(can);
       }
-    } else if (previewKind === 'saw') {
-      // 모터도 회전도 없이, 주먹 면에 너무 큰 톱날 한 장이 비뚤게 박혀 있다.
-      const core = keep(new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.034, 0.036, 2, 2, 2), M.black));
-      core.position.set(-0.003, -0.002, 0.003); core.rotation.z = 0.08;
-      const blade = keep(new THREE.Mesh(C.sawBlade, M.rust));
-      blade.position.set(0.004, 0.003, 0.025); blade.rotation.set(0.07, -0.10, -0.06); blade.userData.previewRole = 'saw-blade';
-      for (const [y, rz] of [[-0.012, -0.13], [0.014, 0.10]]) {
-        const strap = keep(new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.006, 0.0045), M.galv));
-        strap.position.set(-0.002, y, 0.031); strap.rotation.z = rz;
-      }
-      const hub = keep(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.007, 14), M.galv));
-      hub.rotation.x = Math.PI / 2; hub.position.set(0.004, 0.003, 0.034);
-      const nut = keep(new THREE.Mesh(C.nut, M.brass)); nut.position.set(0.004, 0.003, 0.040); nut.scale.setScalar(1.25);
     } else if (previewKind === 'cutlery') {
       // 울버린 흉내를 내지만 너무 앙상하고, 세 갈래가 전부 벽보다 30도쯤 위를 찌른다.
       const zStart = stumpZ - lump.position.z + 0.006, zEnd = -0.012, zSpan = zEnd - zStart;
@@ -617,7 +590,7 @@ export class Scrap {
       }
     }
     // 덩어리 → 그루터기 사이를 잇는 쇠막대 두어 개
-    const ownsMount = ['umbrella', 'canchain', 'saw', 'cutlery'].includes(previewKind);
+    const ownsMount = ['umbrella', 'canchain', 'cutlery'].includes(previewKind);
     if (!this.pipe && !ownsMount) {
       for (let k = 0; k < 2; k++) {
         const r = new THREE.Mesh(C.rebar, M.rust);
@@ -641,7 +614,6 @@ export class Scrap {
     else if (previewKind === 'umbrella') this.glow.scale.set(0.46, 0.46, 0.68);
     else if (previewKind === 'canchain') this.glow.scale.set(0.48, 0.48, 1.6);
     else if (previewKind === 'cutlery') this.glow.scale.set(0.48, 0.34, 0.85);
-    else if (previewKind === 'saw') this.glow.scale.set(0.78, 0.78, 0.62);
     else this.glow.scale.set(0.95, 0.8, 1.05);
     lump.add(this.glow);
   }
