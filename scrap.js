@@ -3,6 +3,18 @@ import * as THREE from 'three';
 
 let CACHE = null;
 export const SCRAP_KINDS = Object.freeze(['base', 'wire', 'hand', 'umbrella', 'canchain', 'cutlery']);
+
+export function pickScrapKind(equipCount, random = Math.random) {
+  if (!(equipCount > 0)) return 'base';
+  // 이후에는 전부 랜덤. 기본형만 다른 형식보다 1%만 더 높은 가중치를 둔다.
+  const baseWeight = 1.01;
+  let roll = random() * (SCRAP_KINDS.length - 1 + baseWeight);
+  for (const kind of SCRAP_KINDS) {
+    roll -= kind === 'base' ? baseWeight : 1;
+    if (roll < 0) return kind;
+  }
+  return SCRAP_KINDS[SCRAP_KINDS.length - 1];
+}
 function mulberry(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 const OBJ_NOISE = /* glsl */`
@@ -202,7 +214,7 @@ function wireTendril(rng, angle, len, turns) {
 }
 
 export class Scrap {
-  constructor(arm, seed, kind = 'base', options = {}) {
+  constructor(arm, seed, kind = 'base') {
     if (!CACHE) CACHE = buildCache();
     this.arm = arm;
     const rng = this.rng = mulberry(Math.floor(seed));
@@ -212,11 +224,9 @@ export class Scrap {
     const requestedPreview = new URLSearchParams(location.search).get('scrapPreview');
     const previewKind = SCRAP_KINDS.includes(requestedPreview) ? requestedPreview : SCRAP_KINDS.includes(kind) ? kind : 'base';
     this.kind = this.previewKind = previewKind;
-    // 철권 자체의 길이는 남은 팔 길이와 무관하게 고정한다. 짧아진 자리를 쇠로
-    // 새로 메우지 않고, 완성된 철권 전체를 현재 그루터기 끝으로 옮겨 붙인다.
-    this.followStump = !options.fillMissing;
-    this.mountZ = this.followStump ? 0.004 : Math.min(arm.cutZ, 0.006);
-    const stumpZ = this.mountZ;
+    // 붙이는 자리: 그루터기 끝(cutZ) → 원래 손목(0.004)까지는 쇠팔뚝으로 메운다.
+    // 살이 얼마나 짧아졌든 철권의 타격면은 원래 길이에 남아 화면 밖으로 빠지지 않는다.
+    const stumpZ = Math.min(arm.cutZ, 0.006);
     const wristZ = 0.004;
     const pipeLen = wristZ - stumpZ + 0.02;
     const fullPipeHP = stumpZ < -0.012 ? 30 + pipeLen * 140 : 0;
@@ -635,10 +645,7 @@ export class Scrap {
     else if (previewKind === 'cutlery') this.glow.scale.set(0.48, 0.34, 0.85);
     else this.glow.scale.set(0.95, 0.8, 1.05);
     lump.add(this.glow);
-    this._syncMount();
   }
-  get mountShift() { return this.followStump ? Math.min(this.arm.cutZ, 0.006) - this.mountZ : 0; }
-  _syncMount() { this.group.position.z = this.mountShift; }
   // 맞을 때 부품이 떨어져 나감. 떨어진 개수 반환
   onDamage(hit, fx, wall, contact) {
     let n = 0;
@@ -682,7 +689,6 @@ export class Scrap {
     return n;
   }
   update(dt, time) {
-    this._syncMount();
     if (this.lump) this.lump.rotation.z = Math.sin(time * 13) * 0.004;
     this.heat = Math.max(0, this.heat - dt * 0.12);
     this.glow.material.uniforms.opacity.value = Math.min(0.55, this.heat * 0.6) * (0.85 + Math.sin(time * 9) * 0.15);

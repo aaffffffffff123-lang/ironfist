@@ -5,7 +5,7 @@ import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT } from './arm.js';
 import { WALLS, createWall, hitter } from './walls.js';
 import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
-import { Scrap, SCRAP_KINDS } from './scrap.js';
+import { Scrap, SCRAP_KINDS, pickScrapKind } from './scrap.js';
 import { UI } from './ui.js';
 import { SkillFX, SKILL_OF, SKILLS, skillKind } from './skills.js';
 
@@ -92,6 +92,7 @@ const G = {
   v: 2, endure: 0, openedAt: 0, owned: ['cement'], wall: 'cement',
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
+  scrapEquips: 0,
   decals: {}, stuck: {}, old: {},
   seenHints: {}, seenSkill: {},
 };
@@ -120,6 +121,9 @@ function load() {
     if (!valid.has(G.wall) || !G.owned.includes(G.wall)) G.wall = 'cement';
     if (!G.seenSkill || typeof G.seenSkill !== 'object') G.seenSkill = {};
     if (!G.old || typeof G.old !== 'object') G.old = {};
+    // 구형 저장에는 장착 횟수가 없다. 지금 철권이 남아 있으면 이미 첫 장착을 한 것으로 본다.
+    const savedScrap = !!(s.arms && (s.arms.L?.scrap || s.arms.R?.scrap));
+    G.scrapEquips = Number.isFinite(s.scrapEquips) ? Math.max(0, Math.floor(s.scrapEquips)) : (savedScrap ? 1 : 0);
     for (const bag of [G.decals, G.stuck, G.old]) if (bag && typeof bag === 'object') { delete bag.traps; delete bag.slime; }
     // 예전 버전의 벽 타격 흔적 저장값도 함께 폐기한다.
     delete G.wallDamage;
@@ -1253,9 +1257,9 @@ function restoreArm(a, snap) {
     a.scrapObj = new Scrap(a, snap.scrap.seed, kind);
     a.scrap = a.scrapObj.state;
     a.scrap.lumpHP = snap.scrap.lump;
-    // 예전 저장의 pipeHP는 짧아진 살 구간을 쇠로 메우던 길이에서 생긴 값이다.
-    // 고정 길이 철권에는 그 구간이 없으므로 새 형상이 실제로 가진 HP까지만 복원한다.
-    a.scrap.pipeHP = Math.min(a.scrap.pipeHP, Number.isFinite(snap.scrap.pipe) ? snap.scrap.pipe : 0);
+    // 직전 회귀 버전은 쇠팔뚝을 만들지 않아 pipe를 0으로 저장했다.
+    // 양수인 실제 손상값만 복원하고, 0이면 현재 팔 길이에 맞춰 새로 만든 쇠팔뚝을 살린다.
+    if (Number.isFinite(snap.scrap.pipe) && snap.scrap.pipe > 0) a.scrap.pipeHP = Math.min(a.scrap.pipeHP, snap.scrap.pipe);
     if (a.scrap.lumpHP <= 0) a.scrapObj.onDamage('lump', { flyScrapPart: (p) => p.parent && p.parent.remove(p) }, null, null);
   }
 }
@@ -1293,9 +1297,10 @@ const actions = {
     if (a.hasFist()) return false;
     if (a.scrapObj) a.scrapObj.dispose();
     a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
-    const kind = SCRAP_KINDS[Math.floor(Math.random() * SCRAP_KINDS.length)];
+    const kind = pickScrapKind(G.scrapEquips);
     a.scrapObj = new Scrap(a, a.scrapSeed, kind);
     a.scrap = a.scrapObj.state;
+    G.scrapEquips = Math.max(0, Number.isFinite(G.scrapEquips) ? Math.floor(G.scrapEquips) : 0) + 1;
     resetArmMotion(side);
     G.arms[side] = armSnapshot(a);
     save(); sfx.play('scrapOn', 0.9); return true;

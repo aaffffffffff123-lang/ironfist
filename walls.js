@@ -898,7 +898,7 @@ class SpikeWall extends WallBase {
   // 먼저 다녀간 사람의 고철 주먹: 꼬챙이에 꿰인 채 버려져 녹슬어 있음
   addOldFist() {
     const holder = { attach: { forearm: new THREE.Group() }, cutZ: -0.03, traps: [] };
-    const sc = new Scrap(holder, 4243, 'base', { fillMissing: true });
+    const sc = new Scrap(holder, 4243);
     if (sc.glow) sc.glow.parent && sc.glow.parent.remove(sc.glow);
     const g = holder.attach.forearm;
     const rustSurf = `

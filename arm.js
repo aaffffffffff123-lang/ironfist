@@ -1127,9 +1127,8 @@ export class Arm {
   // 주먹 앞면(타격면)이 팔 원점(손목)에서 +Z로 얼마나 앞에 있는지
   reach() {
     if (this.I < 0.5) { const f = Math.min(0.097, this.crushZ + LUMP_T * 0.85); return f > 0 ? f * this.handScale.z : f; }
-    const scrapShift = this.scrapObj ? this.scrapObj.mountShift : 0;
-    if (this.scrap && this.scrap.lumpHP > 0) return 0.097 + scrapShift;
-    if (this.scrap && this.scrap.pipeHP > 0) return scrapShift;
+    if (this.scrap && this.scrap.lumpHP > 0) return 0.097;
+    if (this.scrap && this.scrap.pipeHP > 0) return 0.0;
     return this.crushZ + LUMP_T * 0.8;
   }
   // 부러진 손등뼈 비율(0~1) — 클수록 맞을 때 손이 깊이 우그러짐
