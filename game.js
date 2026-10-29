@@ -459,9 +459,8 @@ class Fist {
     if (launcher) {
       // 줄자형은 팔을 내지르지 않는다. 가드에 남은 팔에서 몸통만 기존 타격 거리만큼 발사된다.
       out.position.copy(P.p0); out.quaternion.copy(P.q0);
-      tmpV.copy(P.p1).sub(P.p0); tmpQ.copy(P.q0).invert(); tmpV.applyQuaternion(tmpQ);
-      const driven = Number.isFinite(launcher.previewLaunch) ? launcher.previewLaunch : (this.state === 'idle' ? 0 : sc);
-      launcher.setLaunch(driven, tmpV);
+      launcher.launchDrive = Number.isFinite(launcher.previewLaunch) ? launcher.previewLaunch : (this.state === 'idle' ? 0 : sc);
+      launcher.launchWorldDelta.copy(P.p1).sub(P.p0);
     } else {
       out.position.lerpVectors(P.p0, P.p1, s);
       // 휘두르는 호
@@ -1043,6 +1042,10 @@ function step(dt, rdt = dt) {
     A.squash = f.comp * f.squashK;
     A.U.uImp.value.set(f.impT, f.ripA, f.ripZ);
     A.update(dt, time);
+    if (A.scrapObj?.launchesBody) {
+      A.root.updateMatrixWorld(true);
+      A.scrapObj.setLaunchAlongArm(A.scrapObj.launchDrive, A.scrapObj.launchWorldDelta);
+    }
     if (A.scrapObj) A.scrapObj.update(dt, time);
   }
   // 유리: 출혈로 팔이 닳음
@@ -1147,8 +1150,7 @@ async function boot() {
   // 숨은 실제 게임 그래픽 시안: 기본 주소와 저장 데이터에는 영향을 주지 않는다.
   const previewOptions = [
     ['base', '기본형 · 비교'], ['wire', '철사 파마'], ['hand', '철근 가짜손'],
-    ['pipes', '배관다발'], ['clamps', '집게 도배'], ['umbrella', '우산 뼈다귀'],
-    ['tape', '줄자 몸통포'], ['canchain', '깡통 척추'], ['saw', '톱날 박힘'],
+    ['umbrella', '우산 뼈다귀'], ['tape', '줄자 몸통포'], ['canchain', '깡통 팔'], ['saw', '톱날 박힘'],
     ['cutlery', '급식 울버린'],
   ];
   const scrapPreview = QS.get('scrapPreview');
