@@ -184,32 +184,30 @@ function design(S) {
     return S.filt(o, 'lp', 2400, 0.7);
   }, 4);
 
-  // 타이틀·장착 프레스의 대형 쇠망치. 저역 몸통, 짧은 강철 파열음,
-  // 공장 안에서 늦게 돌아오는 공명을 한 타격 안에 겹친다.
+  // 대장간 망치가 모루를 때리는 소리. 통처럼 울리는 저역을 쓰지 않고,
+  // 접촉 순간의 날카로운 파열과 모루의 비정수 금속 공명만 남긴다.
   put('forgeHit', () => {
-    const o = S.buf(1.0);
-    S.add(o, thudCore(rnd(72, 88), rnd(1450, 1850), 0.35), 0, 1.1);
-    S.add(o, S.sat(S.sweep(0.5, rnd(250, 290), rnd(43, 51), 0.014, 0.12), 3.0), 0, 0.9);
-    const crack = S.filt(S.noise(Math.floor(0.032 * S.sr)), 'bp', rnd(2100, 2900), 1.35);
-    S.add(o, S.mul(crack, S.envExp(crack.length, 0.00004, 0.0045)), 0, 0.92);
-    const f = rnd(185, 225);
-    S.add(o, S.modal(0.92, [
-      [f, 0.8, rnd(0.26, 0.34)],
-      [f * rnd(2.35, 2.6), 0.46, rnd(0.16, 0.23)],
-      [f * rnd(4.4, 5.1), 0.23, rnd(0.08, 0.14)],
-      [f * rnd(8.0, 9.2), 0.1, rnd(0.035, 0.065)],
-    ], 0.0002), 0.001, 0.9);
-    const room = S.filt(S.filt(S.noise(Math.floor(0.72 * S.sr)), 'lp', 760, 0.7), 'hp', 45, 0.7);
-    S.add(o, S.mul(room, S.envExp(room.length, 0.004, 0.17)), 0.025, 0.22);
-    return S.sat(o, 1.45);
+    const o = S.buf(0.62);
+    const edge = S.filt(S.noise(Math.floor(0.012 * S.sr)), 'hp', 2800, 0.65);
+    S.add(o, S.mul(edge, S.envExp(edge.length, 0.00002, 0.0015)), 0, 1.0);
+    const bite = S.filt(S.noise(Math.floor(0.035 * S.sr)), 'bp', rnd(1500, 2100), 1.35);
+    S.add(o, S.mul(bite, S.envExp(bite.length, 0.00005, 0.006)), 0, 0.75);
+    const f = rnd(330, 380);
+    S.add(o, S.modal(0.58, [
+      [f, 0.18, rnd(0.05, 0.075)],
+      [f * 2.68, 0.82, rnd(0.16, 0.2)],
+      [f * 4.91, 0.52, rnd(0.095, 0.13)],
+      [f * 7.37, 0.27, rnd(0.055, 0.08)],
+      [f * 11.15, 0.11, rnd(0.028, 0.045)],
+    ], 0.00008), 0.0003, 0.92);
+    return S.filt(S.sat(o, 1.15), 'hp', 240, 0.7);
   }, 4);
   put('mountLock', () => {
-    const o = S.buf(0.36);
-    const snap = S.filt(S.noise(Math.floor(0.012 * S.sr)), 'hp', 1800, 0.65);
-    S.add(o, S.mul(snap, S.envExp(snap.length, 0.00003, 0.0018)), 0, 0.72);
-    S.add(o, S.modal(0.32, [[rnd(540, 660), 0.7, 0.08], [rnd(1280, 1550), 0.42, 0.045], [rnd(2700, 3300), 0.18, 0.02]]), 0, 0.75);
-    S.add(o, S.sweep(0.18, rnd(170, 210), rnd(70, 84), 0.025, 0.05), 0.018, 0.5);
-    return S.sat(o, 1.5);
+    const o = S.buf(0.2);
+    const snap = S.filt(S.noise(Math.floor(0.01 * S.sr)), 'hp', 2200, 0.65);
+    S.add(o, S.mul(snap, S.envExp(snap.length, 0.00003, 0.0015)), 0, 0.7);
+    S.add(o, S.modal(0.18, [[rnd(470, 560), 0.25, 0.025], [rnd(1050, 1250), 0.55, 0.04], [rnd(2300, 2800), 0.28, 0.018]]), 0, 0.7);
+    return S.filt(S.sat(o, 1.25), 'hp', 300, 0.7);
   }, 3);
 
   // 모아치기 — 일반 타격 위에 얹는 전용 층. 첫머리는 짧고 단단하게,
@@ -853,16 +851,14 @@ export class SFX {
   titleImpact() {
     if (this._titleImpactPlayed) return;
     this._titleImpactPlayed = true;
-    this.play('forgeHit', 1.08, { jitter: 0.02, verbAmt: 0.75 });
-    this.play('powerRoom', 0.42, { delay: 0.035, rate: 0.72, jitter: 0.02, verbAmt: 0.75 });
+    this.play('forgeHit', 1.08, { jitter: 0.012, verbAmt: 0.4 });
   }
   // 장착 프레스는 터무니없이 강하고, 공개된 철권만 뒤늦게 초라한 소리를 낸다.
   equip(kind, side = 'L') {
     const pan = side === 'L' ? -0.32 : 0.32;
-    this.play('mountLock', 0.78, { pan, rate: 0.92, jitter: 0.025, verbAmt: 0.35 });
-    this.play('forgeHit', 1.0, { pan, delay: 0.055, rate: 0.98, jitter: 0.02, verbAmt: 0.68 });
-    this.play('forgeHit', 0.88, { pan, delay: 0.255, rate: 0.82, jitter: 0.018, verbAmt: 0.7 });
-    this.play('powerRoom', 0.36, { pan, delay: 0.285, rate: 0.68, jitter: 0.02, verbAmt: 0.7 });
+    this.play('mountLock', 0.55, { pan, rate: 1, jitter: 0.015, verbAmt: 0.22 });
+    this.play('forgeHit', 1.0, { pan, delay: 0.055, rate: 1, jitter: 0.012, verbAmt: 0.4 });
+    this.play('forgeHit', 0.9, { pan, delay: 0.3, rate: 0.96, jitter: 0.012, verbAmt: 0.42 });
     const cheap = {
       base: ['clank', 0.18, 0.86],
       wire: ['wire', 0.24, 1.12],

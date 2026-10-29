@@ -60,24 +60,6 @@
   user-select: none;
 }
 .logo::after { content: none; }
-.titleStamp {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: min(74vw, 400px);
-  gap: 10px;
-  margin-top: -2px;
-  color: #c1c6ca;
-  font: 900 10px/1 var(--font);
-  letter-spacing: .23em;
-  text-shadow: 0 1px 2px #000;
-}
-.titleStamp i {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, #555c63, #ff7d35, #555c63);
-  box-shadow: 0 0 7px rgba(255, 113, 48, .5);
-}
 .tbtns {
   margin-top: clamp(22px, 4.5vh, 38px);
   gap: 12px;
@@ -85,18 +67,16 @@
 .tbtns > .btn { min-width: 210px; }
 
 #title.intro .logo { animation: titleForgeIn .62s cubic-bezier(.12, .8, .18, 1) both; }
-#title.intro .titleStamp { animation: stampIn .45s .32s ease-out both; }
 #title.intro::after { animation: seamIgnite .72s .1s ease-out both; }
 #title.breach .logo { animation: titleHammer .33s cubic-bezier(.2, .8, .2, 1) both; }
 #title.breach::after { animation: seamStrike .33s ease-out both; }
-#title.breach .tbtns, #title.breach .titleStamp { opacity: 0; transform: translateY(9px); transition: opacity .12s, transform .18s; }
+#title.breach .tbtns { opacity: 0; transform: translateY(9px); transition: opacity .12s, transform .18s; }
 @keyframes titleForgeIn {
   0% { opacity: 0; transform: translateY(-34px) scale(1.12); filter: brightness(2.4) blur(3px); }
   42% { opacity: 1; transform: translateY(9px) scale(.975); filter: brightness(1.6) blur(0); }
   61% { transform: translateY(-3px) scale(1.012); }
   100% { transform: none; }
 }
-@keyframes stampIn { from { opacity: 0; transform: scaleX(.55); } to { opacity: 1; transform: none; } }
 @keyframes seamIgnite { 0% { opacity: 0; transform: rotate(-2deg) scaleX(.08); } 46% { opacity: 1; } 100% { opacity: .75; transform: rotate(-2deg) scaleX(.88); } }
 @keyframes titleHammer {
   0% { transform: none; }
@@ -414,5 +394,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .btn, #title, #hud, #shop, .sheet, #hint, #endureFill, #goalFill { transition: none; }
-  #boot .bar i, #endureBox.full #endureFill, #endureBox.flash, #sArms.shake, #title.intro .logo, #title.intro .titleStamp, #title.intro::after, #title.breach .logo, #title.breach::after, .sheet.mounting, .arm.mounting { animation: none; }
+  #boot .bar i, #endureBox.full #endureFill, #endureBox.flash, #sArms.shake, #title.intro .logo, #title.intro::after, #title.breach .logo, #title.breach::after, .sheet.mounting, .arm.mounting { animation: none; }
 }
