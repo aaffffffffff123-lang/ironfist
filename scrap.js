@@ -208,7 +208,7 @@ export class Scrap {
     }
     this.state = { lumpHP: 140, pipeHP, partsLeft: this.parts.length };
     this.totalLump = 140;
-    this.heat = 0; this.corrode = 0;
+    this.heat = 0;
     // 달아오른 쇳덩이 빛 — 가장자리로 갈수록 흐려지는 공(납작한 원판처럼 안 보이게)
     this.glow = new THREE.Mesh(new THREE.SphereGeometry(0.043, 18, 12), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -231,7 +231,7 @@ export class Scrap {
         // 앞쪽(벽쪽) 부품부터
         this.parts.sort((a, b) => b.position.z - a.position.z);
         const p = this.parts.shift();
-        const embed = Math.random() < 0.5 && wall && wall.def.id !== 'slime';
+        const embed = Math.random() < 0.5 && !!wall;
         fx.flyScrapPart(p, embed);
         n++;
       }
