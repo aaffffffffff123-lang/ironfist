@@ -115,6 +115,33 @@ function buildCache() {
   C.spoonHandle = new THREE.BoxGeometry(0.0042, 0.029, 0.0022);
   C.rivet = new THREE.CylinderGeometry(0.0023, 0.0028, 0.0035, 10);
   C.rivet.rotateX(Math.PI / 2);
+  C.previewPalm = new THREE.BoxGeometry(0.060, 0.044, 0.020, 2, 2, 2);
+  C.pipePlate = new THREE.BoxGeometry(0.070, 0.052, 0.016, 2, 2, 1);
+  C.doorSlab = new THREE.BoxGeometry(0.088, 0.058, 0.014, 2, 2, 1);
+  C.doorLatch = new THREE.BoxGeometry(0.058, 0.010, 0.007);
+  C.bearingRing = new THREE.TorusGeometry(0.036, 0.0025, 6, 30);
+  C.bearingBall = new THREE.SphereGeometry(1, 14, 10);
+  C.clampCore = new THREE.BoxGeometry(0.040, 0.036, 0.038, 2, 2, 2);
+  C.clampHandle = new THREE.BoxGeometry(0.007, 0.052, 0.007);
+  C.clampJaw = new THREE.BoxGeometry(0.014, 0.018, 0.014);
+  C.clampPivot = new THREE.CylinderGeometry(0.006, 0.006, 0.012, 10);
+  C.clampPivot.rotateX(Math.PI / 2);
+  C.bikeGear = ext(gearShape(0.038, 22, 0.013), 0.006, 0.0005);
+  C.bellDome = new THREE.SphereGeometry(0.017, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  C.bellDome.rotateX(Math.PI / 2);
+  C.bellBase = new THREE.CylinderGeometry(0.018, 0.018, 0.003, 18);
+  C.bellBase.rotateX(Math.PI / 2);
+  C.brakePad = new THREE.BoxGeometry(0.029, 0.010, 0.009);
+  C.heatBase = new THREE.BoxGeometry(0.074, 0.058, 0.010);
+  C.heatFin = new THREE.BoxGeometry(0.0025, 0.052, 0.055);
+  C.heatRail = new THREE.BoxGeometry(0.076, 0.006, 0.004);
+  C.giantBoltHead = ext(hexShape(0.032, 0), 0.018, 0.0012);
+  C.giantBoltNut = ext(hexShape(0.026, 0.011), 0.015, 0.001);
+  C.giantBoltWasher = ext(ringShape(0.031, 0.012), 0.003, 0.0004);
+  C.giantBoltRod = new THREE.CylinderGeometry(0.0112, 0.0112, 0.112, 12);
+  C.giantBoltRod.rotateZ(Math.PI / 2);
+  C.giantBoltThread = new THREE.TorusGeometry(0.0117, 0.0009, 4, 12);
+  C.giantBoltThread.rotateY(Math.PI / 2);
   C.mat = {
     rust: metalMat(0x7a6656, 0.55, 0.75, 0.75, 'rust'),
     galv: metalMat(0xb9bec4, 0.4, 1.0, 0.18, 'galv'),
@@ -124,6 +151,7 @@ function buildCache() {
     copper: new THREE.MeshStandardMaterial({ color: 0xb87333, roughness: 0.35, metalness: 1.0 }),
     wire: new THREE.MeshStandardMaterial({ color: 0x3c3c3c, roughness: 0.45, metalness: 0.9 }),
     canRed: metalMat(0x7d2921, 0.48, 0.72, 0.36, 'can-red'),
+    hole: new THREE.MeshStandardMaterial({ color: 0x171310, roughness: 0.95, side: THREE.BackSide }),
   };
   return C;
 }
@@ -207,91 +235,145 @@ export class Scrap {
     };
 
     if (previewKind === 'wire') {
-      // 철사만으로 말랑해 보이지 않도록 안쪽에는 작은 고철 심이 남아 있다.
-      const core = keep(new THREE.Mesh(new THREE.DodecahedronGeometry(0.026, 0), M.rust));
-      core.position.set(0, -0.001, 0.013); core.scale.set(1.12, 0.9, 0.82);
-      for (let i = 0; i < 7; i++) {
-        const w = new THREE.Mesh(wireLoop(rng, 0.026 + rng() * 0.007), i % 3 === 0 ? M.copper : M.wire);
+      // 기본형보다 외곽 부피가 두 배 가까이 읽히는 철사 파마 덩어리.
+      const core = keep(new THREE.Mesh(new THREE.DodecahedronGeometry(0.028, 0), M.rust));
+      core.position.set(0, -0.001, 0.009); core.scale.set(1.18, 1.0, 0.65);
+      for (let i = 0; i < 18; i++) {
+        const w = new THREE.Mesh(wireLoop(rng, 0.042 + rng() * 0.010), i % 5 === 0 ? M.copper : M.wire);
         w.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
-        w.scale.set(1, 0.88 + rng() * 0.18, 0.82);
+        w.scale.set(1.08 + rng() * 0.18, 0.95 + rng() * 0.18, 0.55);
         lump.add(w);
       }
       this.tendrils = [];
-      const dirs = [-2.75, -2.0, -1.25, -0.38, 0.38, 1.18, 2.02, 2.72];
+      const dirs = [-2.9, -2.35, -1.8, -1.18, -0.55, 0.1, 0.72, 1.35, 1.98, 2.55];
       for (let i = 0; i < dirs.length; i++) {
-        const w = new THREE.Mesh(wireTendril(rng, dirs[i], 0.031 + rng() * 0.015, 2.2 + rng() * 1.5), i % 4 === 0 ? M.copper : M.wire);
-        w.position.z = -0.001 + rng() * 0.006;
-        w.rotation.z = (rng() - 0.5) * 0.16;
+        const w = new THREE.Mesh(wireTendril(rng, dirs[i], 0.052 + rng() * 0.028, 2.4 + rng() * 1.8), i % 4 === 0 ? M.copper : M.wire);
+        w.position.z = -0.004 + rng() * 0.007;
+        w.rotation.z = (rng() - 0.5) * 0.18;
         lump.add(w); this.tendrils.push(w);
       }
-      for (let i = 0; i < 4; i++) {
-        const k = i % 2 ? 'nutS' : 'washer';
-        const m = keep(new THREE.Mesh(C[k], i === 1 ? M.brass : M.galv));
-        m.position.set((i - 1.5) * 0.009, (i % 2 ? 1 : -1) * 0.008, 0.028 + i * 0.002);
+      for (let i = 0; i < 3; i++) {
+        const m = keep(new THREE.Mesh(i === 1 ? C.nutS : C.washer, i === 1 ? M.brass : M.galv));
+        m.position.set((i - 1) * 0.012, (i % 2 ? 1 : -1) * 0.008, 0.031 + i * 0.002);
         m.rotation.set(rng() * 2, rng() * 2, rng() * 2);
       }
     } else if (previewKind === 'bolt') {
-      // 하나의 굵은 나사축이 몸체고, 큰 너트·와셔가 헐겁게 층층이 끼워진 형식.
-      const rod = keep(new THREE.Mesh(C.threadRod, M.black));
-      rod.position.z = 0.001;
-      for (let i = 0; i < 13; i++) {
-        const t = new THREE.Mesh(new THREE.TorusGeometry(0.0092, 0.0008, 4, 12), i % 4 === 0 ? M.galv : M.rust);
-        t.position.z = -0.036 + i * 0.006;
-        lump.add(t);
+      // 화면을 가로지르는 볼트 한 개: 왼쪽 육각 머리, 오른쪽 너트와 드러난 나사산.
+      const rod = keep(new THREE.Mesh(C.giantBoltRod, M.black));
+      rod.position.set(0.001, -0.002, 0.009); rod.rotation.z = -0.08;
+      for (let i = 0; i < 15; i++) {
+        const t = keep(new THREE.Mesh(C.giantBoltThread, i % 4 === 0 ? M.galv : M.rust));
+        t.position.set(-0.026 + i * 0.0054, -0.002 + i * 0.0004, 0.009);
+        t.rotation.z = -0.08;
       }
-      const nz = [-0.024, 0.006, 0.034];
-      for (let i = 0; i < nz.length; i++) {
-        const n = keep(new THREE.Mesh(C.bigNut, i === 1 ? M.rust : M.galv));
-        n.position.z = nz[i]; n.rotation.z = (i - 1) * 0.18;
-      }
-      const wz = [-0.033, -0.015, -0.008, 0.018, 0.025];
-      for (let i = 0; i < wz.length; i++) {
-        const w = keep(new THREE.Mesh(C.bigWasher, i % 2 ? M.rust : M.galv));
-        w.position.z = wz[i]; w.rotation.z = (rng() - 0.5) * 0.18;
-        w.scale.set(0.94 + rng() * 0.12, 0.94 + rng() * 0.12, 1);
-      }
-      const tag = keep(new THREE.Mesh(C.tinLid, M.canRed));
-      tag.position.set(0.027, -0.015, 0.006); tag.scale.set(0.62, 0.9, 1); tag.rotation.z = 0.35;
-      const sideBolt = keep(new THREE.Mesh(C.bolt, M.brass));
-      sideBolt.position.set(-0.025, 0.014, 0.003); sideBolt.rotation.set(0.5, 1.2, -0.3); sideBolt.scale.setScalar(0.72);
+      const head = keep(new THREE.Mesh(C.giantBoltHead, M.galv));
+      head.rotation.set(0, Math.PI / 2, -0.08); head.position.set(-0.050, 0.002, 0.009);
+      const washer = keep(new THREE.Mesh(C.giantBoltWasher, M.rust));
+      washer.rotation.set(0, Math.PI / 2, -0.08); washer.position.set(0.018, -0.003, 0.009);
+      const nut = keep(new THREE.Mesh(C.giantBoltNut, M.brass));
+      nut.rotation.set(0, Math.PI / 2, -0.08); nut.position.set(0.033, -0.004, 0.009);
+      const mount = keep(new THREE.Mesh(new THREE.BoxGeometry(0.040, 0.032, 0.014), M.rust));
+      mount.position.set(0, 0, -0.018); mount.rotation.z = 0.05;
     } else if (previewKind === 'kitchen') {
-      // 캔과 철수세미는 타격면이 아니라, 끝까지 남는 철판 심에 붙인 장식이다.
+      // 큰 비대칭 캔판과 처진 뚜껑이 먼저 보이고, 식기·철수세미는 그 위의 조연이다.
       const core = keep(new THREE.Mesh(C.kitchenCore, M.rust));
-      core.position.z = 0.011; core.rotation.set(0.05, -0.08, 0.08);
-      for (let i = 0; i < 2; i++) {
-        const panel = keep(new THREE.Mesh(C.canPanel, i ? M.galv : M.canRed));
-        panel.position.set(i ? 0.031 : -0.031, i ? -0.004 : 0.005, 0.009);
-        panel.rotation.set(0.08, i ? -0.45 : 0.45, i ? -0.25 : 0.2);
-        panel.scale.set(0.85, 1, 0.72);
-      }
-      for (let i = 0; i < 2; i++) {
-        const lid = keep(new THREE.Mesh(C.tinLid, i ? M.brass : M.galv));
-        lid.position.set(i ? 0.024 : -0.022, 0.024 - i * 0.048, 0.025);
-        lid.rotation.set((i ? -1 : 1) * 0.18, (i ? -1 : 1) * 0.2, i ? 0.35 : -0.2);
-        lid.scale.set(0.82, 1.08, 1);
-      }
-      const spoonPos = [[-0.018, 0.010, -0.32], [0.002, 0.014, 0.08], [0.021, 0.004, 0.4]];
+      core.position.z = 0.008; core.scale.set(1.08, 0.92, 0.88); core.rotation.z = 0.06;
+      const redWing = keep(new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.060, 16, 1, true, 0.2, Math.PI * 1.35), M.canRed));
+      redWing.position.set(-0.052, 0.004, 0.006); redWing.rotation.set(0.08, 0.52, 0.30); redWing.scale.set(1.15, 1, 0.62);
+      const tinWing = keep(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.052, 16, 1, true, 0.1, Math.PI * 1.25), M.galv));
+      tinWing.position.set(0.045, -0.012, 0.002); tinWing.rotation.set(-0.08, -0.55, -0.24); tinWing.scale.set(1.0, 1, 0.66);
+      const lid = keep(new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.002, 20), M.brass));
+      lid.rotation.x = Math.PI / 2; lid.position.set(0.052, -0.034, 0.020); lid.rotation.z = 0.45;
+      const spoonPos = [[-0.023, 0.008, -0.28], [0, 0.012, 0.03], [0.023, 0.005, 0.34]];
       for (let i = 0; i < spoonPos.length; i++) {
-        const [x, y, rz] = spoonPos[i];
-        const spoon = new THREE.Group();
+        const [x, y, rz] = spoonPos[i], spoon = new THREE.Group();
         const bowl = new THREE.Mesh(C.spoonBowl, i === 1 ? M.brass : M.galv);
-        bowl.position.y = 0.007; bowl.scale.set(0.72, 1.08, 0.26);
-        const handle = new THREE.Mesh(C.spoonHandle, i === 1 ? M.brass : M.galv);
-        handle.position.y = -0.012;
-        spoon.add(bowl, handle); spoon.position.set(x, y, 0.040); spoon.rotation.z = rz;
-        keep(spoon);
+        bowl.position.y = 0.007; bowl.scale.set(0.82, 1.18, 0.28);
+        const handle = new THREE.Mesh(C.spoonHandle, i === 1 ? M.brass : M.galv); handle.position.y = -0.012;
+        spoon.add(bowl, handle); spoon.position.set(x, y, 0.040); spoon.rotation.z = rz; keep(spoon);
       }
-      // 철수세미는 틈에서만 삐져나와 본체의 질량을 가리지 않는다.
-      for (let i = 0; i < 7; i++) {
-        const wool = new THREE.Mesh(wireLoop(rng, 0.007 + rng() * 0.004), M.wire);
-        wool.position.set((rng() - 0.5) * 0.052, (rng() - 0.5) * 0.038, 0.006 + rng() * 0.015);
-        wool.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
-        wool.scale.set(0.8, 0.65, 0.5); lump.add(wool);
+      for (let i = 0; i < 9; i++) {
+        const wool = new THREE.Mesh(wireLoop(rng, 0.010 + rng() * 0.005), M.wire);
+        wool.position.set(0.010 + (rng() - 0.5) * 0.045, 0.035 + (rng() - 0.5) * 0.018, 0.004 + rng() * 0.010);
+        wool.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI); wool.scale.set(0.9, 0.75, 0.45); lump.add(wool);
       }
-      for (let i = 0; i < 5; i++) {
-        const rivet = new THREE.Mesh(C.rivet, M.black);
-        rivet.position.set(-0.024 + i * 0.012, i % 2 ? 0.018 : -0.017, 0.038);
-        lump.add(rivet);
+    } else if (previewKind === 'hand') {
+      const palm = keep(new THREE.Mesh(C.previewPalm, M.rust));
+      palm.position.set(0, 0, 0.016); palm.rotation.z = -0.03;
+      const xs = [-0.025, -0.008, 0.010, 0.026], ys = [0.039, 0.044, 0.041, 0.034];
+      const lens = [0.72, 0.92, 0.82, 0.62], rz = [-0.23, -0.07, 0.12, 0.29];
+      for (let i = 0; i < 4; i++) {
+        const f = keep(new THREE.Mesh(C.rebar, M.rust));
+        f.position.set(xs[i], ys[i], 0.017 + i * 0.001); f.scale.set(0.82, lens[i], 0.82); f.rotation.z = rz[i];
+        const kn = keep(new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.014), i === 2 ? M.galv : M.rust));
+        kn.position.set(xs[i], 0.014, 0.039); kn.rotation.z = rz[i] * 0.5;
+      }
+      const thumb = keep(new THREE.Mesh(C.rebar, M.rust));
+      thumb.position.set(-0.041, -0.001, 0.016); thumb.scale.set(0.82, 0.50, 0.82); thumb.rotation.z = 1.03;
+    } else if (previewKind === 'pipes') {
+      const plate = keep(new THREE.Mesh(C.pipePlate, M.black)); plate.position.z = -0.012;
+      const specs = [[-0.028, 0.012, 0.011, 0.048], [-0.009, 0.015, 0.0095, 0.043], [0.011, 0.012, 0.0125, 0.050], [0.030, 0.006, 0.010, 0.045], [0.003, -0.019, 0.013, 0.046]];
+      for (const [x, y, r, len] of specs) {
+        const shell = keep(new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 16, 1, true), M.rust));
+        shell.rotation.x = Math.PI / 2; shell.position.set(x, y, 0.019);
+        const inner = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.78, len + 0.001, 16, 1, true), M.hole);
+        inner.rotation.x = Math.PI / 2; inner.position.copy(shell.position); lump.add(inner);
+        const collar = keep(new THREE.Mesh(new THREE.TorusGeometry(r * 1.03, 0.0016, 5, 18), M.galv));
+        collar.position.set(x, y, 0.043);
+      }
+    } else if (previewKind === 'door') {
+      const slab = keep(new THREE.Mesh(C.doorSlab, M.rust)); slab.position.z = 0.023; slab.rotation.z = 0.03;
+      for (const [x, y, rz] of [[-0.023, 0.012, -0.08], [0.018, 0.013, 0.09], [-0.014, -0.017, 0.03]]) {
+        const h = keep(new THREE.Mesh(C.hinge, M.galv)); h.position.set(x, y, 0.035); h.rotation.z = rz; h.scale.setScalar(0.72);
+      }
+      const latch = keep(new THREE.Mesh(C.doorLatch, M.brass)); latch.position.set(-0.010, 0.014, 0.039);
+      const lock = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.023, 0.008), M.brass); body.position.y = -0.008;
+      const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.010, 0.0028, 6, 18, Math.PI), M.galv); shackle.position.y = 0.006;
+      lock.add(body, shackle); lock.position.set(0.028, -0.004, 0.039); keep(lock);
+      const handle = keep(new THREE.Mesh(new THREE.TorusGeometry(0.021, 0.0034, 7, 20, Math.PI), M.galv));
+      handle.position.set(-0.020, -0.018, 0.040); handle.rotation.z = Math.PI;
+    } else if (previewKind === 'bearing') {
+      const cage = new THREE.Group();
+      for (const [rx, ry, rz] of [[0, 0, 0], [Math.PI / 2, 0, 0], [0, Math.PI / 2, 0]]) {
+        const ring = new THREE.Mesh(C.bearingRing, M.rust); ring.rotation.set(rx, ry, rz); ring.scale.y = 0.86; cage.add(ring);
+      }
+      cage.position.z = 0.007; keep(cage);
+      const balls = [[-0.017, 0.010, 0.010, 0.011], [0.012, 0.013, 0.018, 0.012], [-0.006, -0.015, 0.024, 0.0115], [0.021, -0.010, 0.004, 0.0105]];
+      for (let i = 0; i < balls.length; i++) {
+        const [x, y, z, r] = balls[i], b = keep(new THREE.Mesh(C.bearingBall, i === 2 ? M.brass : M.galv));
+        b.position.set(x, y, z); b.scale.setScalar(r);
+      }
+    } else if (previewKind === 'clamps') {
+      const core = keep(new THREE.Mesh(C.clampCore, M.rust)); core.position.z = 0.010;
+      [0, 2.08, 4.16].forEach((a, i) => {
+        const g = new THREE.Group(); g.rotation.z = a + (i - 1) * 0.12;
+        for (const s of [-1, 1]) {
+          const h = new THREE.Mesh(C.clampHandle, i === 1 ? M.galv : M.rust); h.position.set(s * 0.009, -0.030, 0.004); h.rotation.z = s * 0.19; g.add(h);
+          const jaw = new THREE.Mesh(C.clampJaw, M.black); jaw.position.set(s * 0.006, 0.010, 0.033); jaw.rotation.z = -s * 0.12; g.add(jaw);
+        }
+        const pivot = new THREE.Mesh(C.clampPivot, M.brass); pivot.position.set(0, 0, 0.025); g.add(pivot); keep(g);
+      });
+    } else if (previewKind === 'bicycle') {
+      const gear = keep(new THREE.Mesh(C.bikeGear, M.rust)); gear.position.z = 0.034; gear.rotation.z = 0.08;
+      for (let i = 0; i < 14; i++) {
+        const a = i / 14 * Math.PI * 2, link = keep(new THREE.Mesh(C.link, i % 3 ? M.black : M.galv));
+        link.position.set(Math.cos(a) * 0.043, Math.sin(a) * 0.035, 0.018); link.rotation.z = a + Math.PI / 2 + (i % 2 ? 0.35 : -0.35); link.scale.setScalar(0.52);
+      }
+      for (let i = 0; i < 4; i++) {
+        const tail = keep(new THREE.Mesh(C.link, M.rust)); tail.position.set(0.020 + i * 0.003, -0.047 - i * 0.011, 0.015); tail.rotation.z = i % 2 ? 0.6 : -0.3; tail.scale.setScalar(0.55);
+      }
+      const bell = new THREE.Group(); bell.add(new THREE.Mesh(C.bellBase, M.black), new THREE.Mesh(C.bellDome, M.brass)); bell.position.set(0.044, 0.023, 0.021); keep(bell);
+      const pad = keep(new THREE.Mesh(C.brakePad, M.black)); pad.position.set(-0.034, -0.030, 0.032); pad.rotation.z = -0.25;
+    } else if (previewKind === 'heatsink') {
+      const base = keep(new THREE.Mesh(C.heatBase, M.black)); base.position.z = -0.020;
+      for (let i = 0; i < 11; i++) {
+        const fin = keep(new THREE.Mesh(C.heatFin, i === 2 || i === 8 ? M.rust : M.galv));
+        fin.position.set(-0.033 + i * 0.0066, 0, 0.008);
+        if (i >= 8) { fin.rotation.z = (i - 7) * 0.08; fin.position.y -= (i - 7) * 0.002; }
+      }
+      for (const y of [-0.027, 0.027]) {
+        const rail = keep(new THREE.Mesh(C.heatRail, M.rust)); rail.position.set(0, y, 0.038);
       }
     } else {
       const kinds = ['nut', 'nut', 'nutS', 'washer', 'gear', 'gearS', 'bolt', 'bolt', 'link', 'link', 'spring', 'elbow', 'hinge', 'rebar', 'angle'];
@@ -314,22 +396,23 @@ export class Scrap {
     this.wraps = [];
     if (previewKind === 'wire') {
       for (let k = 0; k < 5; k++) {
-        const w = new THREE.Mesh(wireLoop(rng, 0.030 + k * 0.0012), k === 1 || k === 4 ? M.copper : M.wire);
-        w.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI); w.scale.set(1, 0.92, 0.82);
+        const w = new THREE.Mesh(wireLoop(rng, 0.046 + k * 0.0015), k === 1 || k === 4 ? M.copper : M.wire);
+        w.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI); w.scale.set(1.12, 1.02, 0.55);
         lump.add(w); this.wraps.push(w);
       }
     } else if (previewKind === 'bolt') {
       for (let k = 0; k < 2; k++) {
-        const b = new THREE.Mesh(tapeBand(rng, 0.027 + k * 0.001, 0.007), M.tape);
-        b.rotation.x = Math.PI / 2; b.position.z = -0.018 + k * 0.042; b.scale.set(1, 1, 0.72);
+        const b = new THREE.Mesh(tapeBand(rng, 0.024 + k * 0.001, 0.006), M.tape);
+        b.rotation.x = Math.PI / 2; b.position.z = -0.022 + k * 0.008; b.scale.set(1, 1, 0.66);
         lump.add(b); this.wraps.push(b);
       }
-      for (let k = 0; k < 3; k++) {
-        const w = new THREE.Mesh(wireLoop(rng, 0.026 + k * 0.001), k === 1 ? M.copper : M.wire);
-        w.rotation.set(Math.PI / 2 + (rng() - 0.5) * 0.25, (rng() - 0.5) * 0.25, k * 0.7);
-        w.scale.set(1, 1, 0.75); lump.add(w); this.wraps.push(w);
+    } else if (previewKind === 'kitchen') {
+      for (let k = 0; k < 2; k++) {
+        const b = new THREE.Mesh(tapeBand(rng, 0.026 + k * 0.001, 0.006), k ? M.tape : M.wire);
+        b.rotation.x = Math.PI / 2; b.position.z = -0.020 + k * 0.008; b.scale.set(1, 1, 0.68);
+        lump.add(b); this.wraps.push(b);
       }
-    } else {
+    } else if (!previewKind || previewKind === 'base') {
       for (let k = 0; k < 3; k++) {
         const b = new THREE.Mesh(tapeBand(rng, 0.036 - k * 0.002, 0.012 + rng() * 0.006), M.tape);
         b.rotation.set(rng() * 3.14, rng() * 3.14, rng() * 3.14); b.scale.set(1, 1, 0.82);
