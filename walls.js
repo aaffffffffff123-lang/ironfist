@@ -880,7 +880,13 @@ class SpikeWall extends WallBase {
     `, { key: 'spike', bump: 0.4 });
     this.spikes = [];
     const list = [];
-    for (let y = -0.72; y <= 0.46; y += 0.095) for (let x = -0.62; x <= 0.62; x += 0.095) list.push([x + ((Math.round(y / 0.095)) % 2) * 0.0475, y]);
+    // 기존보다 가로·세로 간격을 각각 절반으로 줄인 촘촘한 엇갈림 격자
+    const spacing = 0.0475;
+    for (let row = 0, y = -0.72; y <= 0.46; y += spacing, row++) {
+      for (let x = -0.62; x <= 0.62; x += spacing) {
+        list.push([x + (row % 2) * spacing * 0.5, y]);
+      }
+    }
     const im = new THREE.InstancedMesh(g, mat, list.length); const d = new THREE.Object3D();
     list.forEach(([x, y], i) => { d.position.set(x, y, -this.D); d.rotation.set(rnd(-0.03, 0.03), rnd(-0.03, 0.03), 0); d.updateMatrix(); im.setMatrixAt(i, d.matrix); this.spikes.push({ x, y }); });
     im.castShadow = true; im.receiveShadow = true;
