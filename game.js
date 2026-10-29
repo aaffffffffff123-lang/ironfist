@@ -5,7 +5,7 @@ import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT } from './arm.js';
 import { WALLS, createWall, hitter } from './walls.js';
 import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
-import { Scrap } from './scrap.js';
+import { Scrap, SCRAP_KINDS } from './scrap.js';
 import { UI } from './ui.js';
 import { SkillFX, SKILL_OF, SKILLS, skillKind } from './skills.js';
 
@@ -838,7 +838,9 @@ function endRound() {
 
 function armSnapshot(a) {
   const s = { I: +a.I.toFixed(4) };
-  if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) s.scrap = { lump: a.scrap.lumpHP, pipe: a.scrap.pipeHP, seed: a.scrapSeed || 1 };
+  if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) s.scrap = {
+    lump: a.scrap.lumpHP, pipe: a.scrap.pipeHP, seed: a.scrapSeed || 1, kind: a.scrapObj?.kind || 'base',
+  };
   return s;
 }
 
@@ -1218,7 +1220,8 @@ function restoreArm(a, snap) {
   a.setStump(snap.I);
   if (snap.scrap) {
     a.scrapSeed = snap.scrap.seed;
-    a.scrapObj = new Scrap(a, snap.scrap.seed);
+    const kind = SCRAP_KINDS.includes(snap.scrap.kind) ? snap.scrap.kind : 'base';
+    a.scrapObj = new Scrap(a, snap.scrap.seed, kind);
     a.scrap = a.scrapObj.state;
     a.scrap.lumpHP = snap.scrap.lump; a.scrap.pipeHP = snap.scrap.pipe;
     if (a.scrap.lumpHP <= 0) a.scrapObj.onDamage('lump', { flyScrapPart: (p) => p.parent && p.parent.remove(p) }, null, null);
@@ -1258,7 +1261,8 @@ const actions = {
     if (a.hasFist()) return false;
     if (a.scrapObj) a.scrapObj.dispose();
     a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
-    a.scrapObj = new Scrap(a, a.scrapSeed);
+    const kind = SCRAP_KINDS[Math.floor(Math.random() * SCRAP_KINDS.length)];
+    a.scrapObj = new Scrap(a, a.scrapSeed, kind);
     a.scrap = a.scrapObj.state;
     resetArmMotion(side);
     G.arms[side] = armSnapshot(a);
