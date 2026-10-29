@@ -1,4 +1,4 @@
-// 철권 — 벽 9종
+// 철권 — 벽 8종
 import * as THREE from 'three';
 import { Scrap } from './scrap.js';
 
@@ -14,7 +14,6 @@ export const WALLS = [
   { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 꿰여 안 빠짐. 같은 쪽을 몇 번 눌러 뜯어내야 함.', mult: 5.6, dmg: 0.0160, scrapDmg: 11, pace: 0.45, space: 0.35, fear: 0.6, kind: { punct: 3 } },
   { id: 'freezer', name: '냉동창고 벽', desc: '언 쇠에 살이 쩍 들러붙음. 뗄 때 가죽이 벗겨짐.', mult: 6.6, dmg: 0.0170, scrapDmg: 10, pace: 0.38, space: 0.3, fear: 0.6, kind: {} },
   { id: 'hotplate', name: '달군 철판', desc: '살이 눌어붙어 탐. 데인 손은 다음 주먹이 한 박자 늦게 나감.', mult: 9.0, dmg: 0.0185, scrapDmg: 12, pace: 0.28, space: 0.23, fear: 0.75, kind: { burn: 0.45 } },
-  { id: 'slime', name: '슬라임 벽', desc: '쑥 빨려 들어가 빼는 데 오래 걸림. 산성이라 빼 보면 살이 녹아 있음.', mult: 12.0, dmg: 0.0190, scrapDmg: 13, pace: 0.41, space: 0.18, fear: 0.5, kind: { acid: 0.45 } },
   { id: 'electric', name: '전기 벽', desc: '감전되면 팔이 경련하며 혼자 몇 대 더 침.', mult: 15.5, dmg: 0.0200, scrapDmg: 14, pace: 0.085, space: 0.072, fear: 0.9, kind: { elec: 0.55 } },
   { id: 'spikes', name: '쇠꼬챙이 가시벽', desc: '주먹을 뚫고 팔뚝까지 꿰여 그 팔을 몇 초 못 씀.', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
 ];
@@ -790,98 +789,7 @@ class HotPlateWall extends WallBase {
   }
 }
 
-// ------------------------------------------------------------------ 8. 슬라임
-class SlimeWall extends WallBase {
-  constructor(def, ctx) {
-    super(def, ctx);
-    this.basePlane(S_BACKCON, { bump: 0.6, z: -0.035 });
-    const N = 120;
-    const g = new THREE.PlaneGeometry(2.0, 1.9, N, N);
-    g.translate(0, -0.12, 0);
-    this.slimeGeo = g;
-    this.rest = g.attributes.position.array.slice();
-    this.ripples = [];
-    const mat = new THREE.MeshPhysicalMaterial({
-      color: 0x8fdc3c, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.78,
-      clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.6, sheen: 0.0,
-      emissive: 0x2b6a10, emissiveIntensity: 0.55,
-    });
-    patchSurface(mat, `
-      float n = fb(vec3(p * 6.0, uTime * 0.15));
-      float bub = smoothstep(0.86, 0.9, vn(vec3(p * 140.0, 3.0)));
-      col *= 0.82 + 0.3 * n; col = mix(col, vec3(0.92, 1.0, 0.85), bub * 0.5);
-      hgt = n * 0.4 + bub * 0.6; rough = 0.06;
-      vec4 bm2 = bloodAt(p); col = mix(col, vec3(0.35, 0.02, 0.02), bm2.a * 0.55);
-    `, { key: 'slime', bump: 0.35, blood: false });
-    const m = new THREE.Mesh(g, mat);
-    m.position.set(0, 0, -this.D + 0.028);
-    m.renderOrder = 2;
-    this.add(m); this.slime = m;
-    this.stopDepth = 0.026;
-    this.floaters = new THREE.Group(); this.add(this.floaters);
-  }
-  surfaceZ() { return -this.D + 0.028; }
-  impact(fist, arm, c) {
-    this.ripples.push({ x: c.x, y: c.y, t: 0, a: 0.012 });
-    this.ctx.fx.bubbles(c, 10);
-    const who = hitter(arm);
-    if (who === 'scrap' && arm.scrapObj) arm.scrapObj.corrode = Math.max(arm.scrapObj.corrode || 0, 2.2);
-    else if (who === 'stump') stumpWound(arm, 7, 0.8, 0.032);
-    else arm.acidT = Math.max(arm.acidT, 2.5);
-    return { stick: 'sink', sink: 0.38 };
-  }
-  update(dt, time, arms) {
-    // 잔물결 + 주먹이 들어간 자리 움푹
-    const pos = this.slimeGeo.attributes.position; const a = pos.array, r = this.rest;
-    for (const rp of this.ripples) rp.t += dt;
-    this.ripples = this.ripples.filter((rp) => rp.t < 2.4);
-    const sinks = [];
-    for (const s of ['L', 'R']) {
-      const fi = this.ctx.fists?.[s];
-      if (!fi) continue;
-      const arm = arms[s];
-      if (fi.state === 'sink' || (fi.state === 'back' && fi.t > 0.6) || fi.state === 'hit') {
-        const c = this.ctx.contactOf(s);
-        sinks.push([c.x, c.y + 0.12, fi.state === 'sink' ? 1 : fi.t]);
-      }
-    }
-    const ox = this.slime.position.x, oy = this.slime.position.y;
-    for (let i = 0; i < pos.count; i++) {
-      const x = r[i * 3], y = r[i * 3 + 1];
-      let z = Math.sin(x * 9 + time * 1.3) * 0.0012 + Math.sin(y * 7 - time * 1.1) * 0.0012;
-      for (const rp of this.ripples) {
-        const d = Math.hypot(x - rp.x, y - (rp.y + 0.12));
-        const w = d - rp.t * 0.35;
-        z += Math.sin(w * 60) * rp.a * Math.exp(-w * w * 200) * Math.exp(-rp.t * 1.6);
-      }
-      for (const [sx, sy, k] of sinks) {
-        const d2 = (x - sx) ** 2 + (y - sy) ** 2;
-        z -= 0.03 * k * Math.exp(-d2 / 0.0012);
-      }
-      a[i * 3 + 2] = z;
-    }
-    pos.needsUpdate = true;
-    this.slimeGeo.computeVertexNormals();
-    // 산: 손이 계속 녹음
-    for (const s of ['L', 'R']) {
-      const arm = arms[s];
-      if (arm.acidT > 0 && arm.I < 0.5) {
-        arm.acidT -= dt;
-        for (const w of arm.wounds) if (w.type === 7) w.k = Math.min(1, w.k + dt * 0.12);
-        arm._apply();
-      }
-    }
-    // 떠다니는 것들 천천히
-    this.floaters.children.forEach((o, i) => { o.rotation.x += dt * 0.05; o.position.y += Math.sin(time * 0.4 + i) * 0.00004; });
-  }
-  addFloater(obj) {
-    obj.position.z = -this.D + rnd(0.004, 0.02);
-    this.floaters.add(obj);
-    while (this.floaters.children.length > 16) this.floaters.remove(this.floaters.children[0]);
-  }
-}
-
-// ------------------------------------------------------------------ 9. 전기
+// ------------------------------------------------------------------ 8. 전기
 class ElectricWall extends WallBase {
   constructor(def, ctx) {
     super(def, ctx);
@@ -947,7 +855,7 @@ function makeHVSign() {
   return m;
 }
 
-// ------------------------------------------------------------------ 10. 쇠꼬챙이
+// ------------------------------------------------------------------ 9. 쇠꼬챙이
 class SpikeWall extends WallBase {
   constructor(def, ctx) {
     super(def, ctx);
@@ -1064,7 +972,7 @@ function mergeGeos(gs) {
 }
 export { mergeGeos, rockGeo };
 
-const CLASSES = { cement: CementWall, gravel: GravelWall, glass: GlassWall, nails: NailWall, freezer: FreezerWall, hotplate: HotPlateWall, slime: SlimeWall, electric: ElectricWall, spikes: SpikeWall };
+const CLASSES = { cement: CementWall, gravel: GravelWall, glass: GlassWall, nails: NailWall, freezer: FreezerWall, hotplate: HotPlateWall, electric: ElectricWall, spikes: SpikeWall };
 
 export function createWall(id, ctx) {
   const def = WALLS.find((w) => w.id === id) || WALLS[0];
