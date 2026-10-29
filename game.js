@@ -21,11 +21,10 @@ const E_AUTO = 0.6;                  // 감전·잔상으로 저절로 나간 �
 const CHARGE_KEEP = 0.65;
 const E_TUG = 1.5, E_RIP = 3;        // 박힌 손 버둥 한 번 / 뜯어냄(고철이면 1/3)
 const E_BLEED = 1.2;                 // 유리가 박혀 피가 새는 동안 초당
-const E_CORRODE = 0.4;               // 고철이 산에 삭는 동안 초당
 const TKD_GAP = 0.33, TKD_BONUS = 0.06;   // 세 대를 이 간격(실제 초) 안에 번갈아 치면 그 세 대의 6% 더
 // 지금 가장 높은 벽을 연 뒤로 이만큼 쌓이면 다음 벽이 열림(시멘트→자갈, 자갈→소주병 …). 보통 속도로 맨손 한 판 + 고철 한 판쯤.
 // 벽마다 보통 속도 맨손 한 판 참을성의 1.1배 — 운이 나빠 덜 쌓인 판이어도 고철 한 판이면 채워짐. 넘친 건 다음 벽으로 안 넘어감
-const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 13870, 40960];
+const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 40960];
 const HANDS_SPAN = 31040;            // 벽이 다 열린 뒤로는 이만큼 쌓일 때마다 새 손
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
@@ -110,13 +109,15 @@ function load() {
     if (!s || !s.owned) return false;
     Object.assign(G, s);
     // 삭제된 벽을 샀거나 선택한 예전 저장도 안전하게 이어서 시작한다.
+    const oldOwned = Array.isArray(G.owned) ? G.owned : [];
+    if (G.wall === 'slime') G.wall = oldOwned.includes('electric') ? 'electric' : 'hotplate';
     const valid = new Set(WALLS.map((w) => w.id));
-    G.owned = [...new Set((Array.isArray(G.owned) ? G.owned : []).filter((id) => valid.has(id)))];
+    G.owned = [...new Set(oldOwned.filter((id) => valid.has(id)))];
     if (!G.owned.includes('cement')) G.owned.unshift('cement');
     if (!valid.has(G.wall) || !G.owned.includes(G.wall)) G.wall = 'cement';
     if (!G.seenSkill || typeof G.seenSkill !== 'object') G.seenSkill = {};
     if (!G.old || typeof G.old !== 'object') G.old = {};
-    for (const bag of [G.decals, G.stuck]) if (bag && typeof bag === 'object') delete bag.traps;
+    for (const bag of [G.decals, G.stuck, G.old]) if (bag && typeof bag === 'object') { delete bag.traps; delete bag.slime; }
     // 예전 버전의 벽 타격 흔적 저장값도 함께 폐기한다.
     delete G.wallDamage;
     // 벽은 순서대로만 열림: 연 벽 중 가장 높은 벽까지가 열린 것
@@ -260,7 +261,7 @@ class Fist {
     this.s = 0;              // 뻗은 정도: 0 가드 ~ 1 벽에 닿음
     this.u = 0; this.s0 = 0; this.dur = STRIKE_T; this.wind = 0; this.slow = false;
     this.queue = 0; this.autoPunch = false; this.pendingChain = null; this.hold = 0;
-    this.stuckTaps = 0; this.stuckT = 0; this.pinT = 0; this.sinkT = 0; this.sinkD = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
+    this.stuckTaps = 0; this.stuckT = 0; this.pinT = 0; this.spasm = 0; this.spasmT = 0; this.spasmT0 = 0.06;
     this.flinchUntil = 0;
     this.tug = 0; this.tremble = 0;
     this.lastPress = -9;
@@ -345,7 +346,7 @@ class Fist {
     sfx.whoosh(this.arm.side, this.dur, this.autoPunch ? (this.rushing ? 0.12 : 0.18) : 0.3 + this.punchCharge * 0.28);
   }
   goBack(dur, slow = false) { this.state = 'back'; this.s0 = this.s; this.u = 0; this.dur = dur; this.slow = slow; }
-  get t() { return clamp(this.s, 0, 1); }   // 벽(슬라임 움푹 패임)이 읽는 뻗은 정도
+  get t() { return clamp(this.s, 0, 1); }
   speed() {
     let s = 1;
     const a = this.arm;
@@ -374,11 +375,6 @@ class Fist {
       case 'stuck': case 'pinned': {
         if (this.state === 'pinned') { this.pinT -= dt; if (this.pinT <= 0) release(this, now, true); }
         if (this.state === 'stuck') { this.stuckT += dt; if (this.stuckT > 2.6) release(this, now, true); }
-        break;
-      }
-      case 'sink': {
-        this.sinkT -= dt;
-        if (this.sinkT <= 0) { this.goBack(0.55, true); sfx.play('suction', 0.7); }
         break;
       }
       case 'spasm': {
@@ -423,9 +419,6 @@ class Fist {
         break;
       }
     }
-    // 슬라임에 빨려 든 깊이: 빨려 들 땐 점점 깊이, 빠질 땐 쑥 빠짐
-    if (this.state === 'sink') this.sinkD = 0.04 * (1 - Math.max(0, this.sinkT) / 0.4);
-    else this.sinkD = Math.max(0, this.sinkD - dt * 0.3);
     // 손목 튕김 스프링(시뮬레이션 시간: 멈춤 동안 그대로 있다가 풀리며 튐)
     const k = 560, c = 2 * 0.48 * Math.sqrt(k);
     this.flickV += (-k * this.flick - c * this.flickV) * dt; this.flick += this.flickV * dt;
@@ -444,7 +437,7 @@ class Fist {
     // 살 주먹은 손이 납작해지는 만큼 팔이 더 들어감(앞면은 벽에 붙은 채). 손등뼈가 부러질수록 더 깊이 우그러짐
     this.push = who === 'hand' ? Math.max(0, a.reach()) * a.squashZ() + 0.0008 : who === 'scrap' ? 0.0025 : 0.004;
     this.squashK = who === 'hand' ? 1 : 0;
-    this.compT = react.stick === 'sink' ? 0 : hs + 0.03;
+    this.compT = hs + 0.03;
     this.ripA = (who === 'hand' ? 1 : 0.75) * Math.min(1.5, feel);
     this.ripZ = Math.min(a.crushZ, 0.016) - (who === 'hand' && a.crushZ > 0.02 ? 0 : 0.004);
     if (!react.stick) this.flickV -= 1.5 + 0.9 * feel;
@@ -507,8 +500,8 @@ class Fist {
     // 눌림 + 충격 떨림
     out.position.addScaledVector(P.D1, this.comp * this.push);
     out.position.add(this.jit);
-    // 당기기·빨려 듦·버둥
-    out.position.addScaledVector(P.D1, -this.tug * 0.02 + this.sinkD);
+    // 당기기·버둥
+    out.position.addScaledVector(P.D1, -this.tug * 0.02);
     if (this.state === 'pinned') out.position.addScaledVector(P.D1, -0.004 * Math.sin(time * 60) * this.tug);
     // 겁나서 떨림
     const tr = this.tremble * (0.0012 + this.arm.I * 0.002);
@@ -636,7 +629,6 @@ function onImpact(fist, now) {
   }
   else if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckTaps = react.taps || 3; fist.stuckT = 0; showHint('stuck'); }
   else if (react.stick === 'pinned') { fist.state = 'pinned'; fist.pinT = react.pin || 2; fist.stuckTaps = 99; showHint('pinned'); }
-  else if (react.stick === 'sink') { fist.state = 'sink'; fist.sinkT = react.sink || 0.4; }
   else if (react.spasm && !fist.autoPunch) { fist.state = 'spasm'; fist.spasm = react.spasm; fist.spasmT = fist.spasmT0 = 0.06; }
   else if (fist.autoPunch && fist.spasm > 0) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.07; }
   else if (fist.autoPunch) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.05; }
@@ -1043,22 +1035,6 @@ function step(dt, rdt = dt) {
     A.U.uImp.value.set(f.impT, f.ripA, f.ripZ);
     A.update(dt, time);
     if (A.scrapObj) A.scrapObj.update(dt, time);
-  }
-  // 슬라임 산에 고철이 삭음
-  if (mode === 'play' && round && !round.ended) {
-    for (const s of ['L', 'R']) {
-      const a = arms[s], so = a.scrapObj;
-      if (so && so.corrode > 0 && a.scrap.lumpHP > 0) {
-        so.corrode -= dt;
-        const res = { flesh: 0, scrap: 0, ev: [], point: null };
-        a.damageScrap(dt * 9 * DAMAGE_PACE * wall.def.space, res);
-        const n = so.onDamage('lump', fx, wall, fx.lastContact || new THREE.Vector3());
-        round.scrapParts += n;
-        addEndure(wall.def.mult * (E_CORRODE * dt + eventEndure(res.ev)));
-        if (Math.random() < dt * 6) fx.bubbles(poses(s, a).contact, 2);
-        if (res.ev.length) checkRoundEnd();
-      }
-    }
   }
   // 유리: 출혈로 팔이 닳음
   if (mode === 'play' && round && !round.ended) {
