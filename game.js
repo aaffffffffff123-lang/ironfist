@@ -1136,23 +1136,65 @@ async function boot() {
   requestAnimationFrame(frame);
   ui.ready();
   // 숨은 실제 게임 그래픽 시안: 기본 주소와 저장 데이터에는 영향을 주지 않는다.
-  // ?scrapPreview=wire|bolt|kitchen 로만 진입하며 같은 카메라·조명·팔 자세에서 비교한다.
+  const previewOptions = [
+    ['base', '기본형 · 비교'], ['wire', '철사 파마'], ['bolt', '거대 가로 볼트'],
+    ['kitchen', '주방 폐품'], ['hand', '철근 가짜손'], ['pipes', '배관다발'],
+    ['door', '문짝 부속'], ['bearing', '베어링 우리'], ['clamps', '집게 우리'],
+    ['bicycle', '자전거 부속'], ['heatsink', '방열판'],
+  ];
   const scrapPreview = QS.get('scrapPreview');
-  if (scrapPreview === 'wire' || scrapPreview === 'bolt' || scrapPreview === 'kitchen') {
-    let seed = 4101;
-    for (const s of ['L', 'R']) {
-      const a = arms[s];
+  let previewIndex = previewOptions.findIndex(([id]) => id === scrapPreview);
+  if (previewIndex >= 0) {
+    const mountPreview = (index) => {
+      previewIndex = (index + previewOptions.length) % previewOptions.length;
+      const kind = previewOptions[previewIndex][0];
+      const q = new URLSearchParams(location.search); q.set('scrapPreview', kind);
+      history.replaceState(null, '', `${location.pathname}?${q}`);
+      const a = arms.L;
       if (a.scrapObj) a.scrapObj.dispose();
-      a.scrapObj = null; a.reset(); a.setStump(1);
-      a.scrapSeed = seed++;
-      a.scrapObj = new Scrap(a, a.scrapSeed);
-      a.scrap = a.scrapObj.state;
-    }
+      a.scrapObj = null; a.reset(); a.setStump(1); a.scrapSeed = 4101;
+      a.scrapObj = new Scrap(a, a.scrapSeed); a.scrap = a.scrapObj.state;
+      arms.L.root.visible = true; arms.R.root.visible = false;
+      resetArmMotion('L');
+    };
+    mountPreview(previewIndex);
     actions.start();
-    fists.L.state = 'idle'; fists.L.s = 0.72;
-    fists.R.state = 'idle'; fists.R.s = 0.10;
     manual = true;
-    tick(0, 1, true);
+    const posePreview = () => {
+      fists.L.state = 'idle'; fists.L.s = 0.22;
+      tick(0, 1, true);
+    };
+    posePreview();
+
+    const nav = document.createElement('div');
+    nav.setAttribute('aria-label', '철권 시안 선택');
+    Object.assign(nav.style, {
+      position: 'fixed', left: '50%', bottom: 'max(14px, env(safe-area-inset-bottom))',
+      transform: 'translateX(-50%)', zIndex: '55', display: 'flex', alignItems: 'center',
+      gap: '8px', width: 'min(92vw, 430px)', padding: '8px', border: '1px solid #8d6a45',
+      borderRadius: '12px', background: 'rgba(24,19,16,.92)', boxShadow: '0 8px 30px rgba(0,0,0,.42)',
+    });
+    const prev = document.createElement('button'), next = document.createElement('button'), select = document.createElement('select');
+    prev.type = next.type = 'button'; prev.textContent = '‹'; next.textContent = '›';
+    for (const [id, name] of previewOptions) {
+      const op = document.createElement('option'); op.value = id; op.textContent = name; select.appendChild(op);
+    }
+    select.value = previewOptions[previewIndex][0];
+    for (const b of [prev, next]) Object.assign(b.style, {
+      flex: '0 0 48px', height: '46px', border: '1px solid #9f7650', borderRadius: '8px',
+      color: '#f1d0a4', background: '#33251d', fontSize: '30px', lineHeight: '1', fontWeight: '800',
+    });
+    Object.assign(select.style, {
+      minWidth: '0', flex: '1 1 auto', height: '46px', border: '1px solid #9f7650', borderRadius: '8px',
+      color: '#f6e5cf', background: '#211915', padding: '0 12px', fontSize: '15px', fontWeight: '800',
+    });
+    const choose = (index) => { mountPreview(index); select.value = previewOptions[previewIndex][0]; posePreview(); };
+    prev.addEventListener('click', () => choose(previewIndex - 1));
+    next.addEventListener('click', () => choose(previewIndex + 1));
+    select.addEventListener('change', () => choose(previewOptions.findIndex(([id]) => id === select.value)));
+    nav.addEventListener('pointerdown', (e) => e.stopPropagation());
+    nav.addEventListener('pointerup', (e) => e.stopPropagation());
+    nav.append(prev, select, next); document.body.appendChild(nav);
   }
   document.body.classList.add('loaded');
 }
