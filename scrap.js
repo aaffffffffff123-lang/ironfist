@@ -238,16 +238,16 @@ export class Scrap {
       // 기본형보다 외곽 부피가 두 배 가까이 읽히는 철사 파마 덩어리.
       const core = keep(new THREE.Mesh(new THREE.DodecahedronGeometry(0.028, 0), M.rust));
       core.position.set(0, -0.001, 0.009); core.scale.set(1.18, 1.0, 0.65);
-      for (let i = 0; i < 18; i++) {
-        const w = new THREE.Mesh(wireLoop(rng, 0.042 + rng() * 0.010), i % 5 === 0 ? M.copper : M.wire);
+      for (let i = 0; i < 36; i++) {
+        const w = new THREE.Mesh(wireLoop(rng, 0.060 + rng() * 0.018), i % 7 === 0 ? M.copper : M.wire);
         w.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
-        w.scale.set(1.08 + rng() * 0.18, 0.95 + rng() * 0.18, 0.55);
+        w.scale.set(1.10 + rng() * 0.22, 1.02 + rng() * 0.20, 0.42);
         lump.add(w);
       }
       this.tendrils = [];
-      const dirs = [-2.9, -2.35, -1.8, -1.18, -0.55, 0.1, 0.72, 1.35, 1.98, 2.55];
+      const dirs = [-2.95, -2.52, -2.08, -1.63, -1.18, -0.73, -0.28, 0.17, 0.62, 1.07, 1.52, 1.97, 2.42, 2.87];
       for (let i = 0; i < dirs.length; i++) {
-        const w = new THREE.Mesh(wireTendril(rng, dirs[i], 0.052 + rng() * 0.028, 2.4 + rng() * 1.8), i % 4 === 0 ? M.copper : M.wire);
+        const w = new THREE.Mesh(wireTendril(rng, dirs[i], 0.050 + rng() * 0.030, 2.8 + rng() * 2.0), i % 5 === 0 ? M.copper : M.wire);
         w.position.z = -0.004 + rng() * 0.007;
         w.rotation.z = (rng() - 0.5) * 0.18;
         lump.add(w); this.tendrils.push(w);
@@ -346,14 +346,19 @@ export class Scrap {
       }
     } else if (previewKind === 'clamps') {
       const core = keep(new THREE.Mesh(C.clampCore, M.rust)); core.position.z = 0.010;
-      [0, 2.08, 4.16].forEach((a, i) => {
-        const g = new THREE.Group(); g.rotation.z = a + (i - 1) * 0.12;
+      for (let i = 0; i < 10; i++) {
+        const a = i / 10 * Math.PI * 2 + (i % 3 - 1) * 0.08;
+        const g = new THREE.Group(); g.rotation.z = a;
+        g.position.set(Math.sin(a) * 0.010, -Math.cos(a) * 0.010, (i % 3 - 1) * 0.003);
+        const grow = 0.78 + (i % 4) * 0.11;
         for (const s of [-1, 1]) {
-          const h = new THREE.Mesh(C.clampHandle, i === 1 ? M.galv : M.rust); h.position.set(s * 0.009, -0.030, 0.004); h.rotation.z = s * 0.19; g.add(h);
-          const jaw = new THREE.Mesh(C.clampJaw, M.black); jaw.position.set(s * 0.006, 0.010, 0.033); jaw.rotation.z = -s * 0.12; g.add(jaw);
+          const h = new THREE.Mesh(C.clampHandle, i % 4 === 1 ? M.galv : M.rust);
+          h.position.set(s * 0.009, -0.034 * grow, 0.004); h.rotation.z = s * (0.14 + (i % 3) * 0.05); h.scale.y = grow; g.add(h);
+          const jaw = new THREE.Mesh(C.clampJaw, i % 5 === 0 ? M.galv : M.black);
+          jaw.position.set(s * 0.006, 0.011, 0.032 + (i % 2) * 0.003); jaw.rotation.z = -s * 0.12; g.add(jaw);
         }
-        const pivot = new THREE.Mesh(C.clampPivot, M.brass); pivot.position.set(0, 0, 0.025); g.add(pivot); keep(g);
-      });
+        const pivot = new THREE.Mesh(C.clampPivot, i % 3 === 0 ? M.brass : M.galv); pivot.position.set(0, 0, 0.025); g.add(pivot); keep(g);
+      }
     } else if (previewKind === 'bicycle') {
       const gear = keep(new THREE.Mesh(C.bikeGear, M.rust)); gear.position.z = 0.034; gear.rotation.z = 0.08;
       for (let i = 0; i < 14; i++) {
