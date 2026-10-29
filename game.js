@@ -1135,6 +1135,25 @@ async function boot() {
   round = blankRound();
   requestAnimationFrame(frame);
   ui.ready();
+  // 숨은 실제 게임 그래픽 시안: 기본 주소와 저장 데이터에는 영향을 주지 않는다.
+  // ?scrapPreview=wire|bolt|kitchen 로만 진입하며 같은 카메라·조명·팔 자세에서 비교한다.
+  const scrapPreview = QS.get('scrapPreview');
+  if (scrapPreview === 'wire' || scrapPreview === 'bolt' || scrapPreview === 'kitchen') {
+    let seed = 4101;
+    for (const s of ['L', 'R']) {
+      const a = arms[s];
+      if (a.scrapObj) a.scrapObj.dispose();
+      a.scrapObj = null; a.reset(); a.setStump(1);
+      a.scrapSeed = seed++;
+      a.scrapObj = new Scrap(a, a.scrapSeed);
+      a.scrap = a.scrapObj.state;
+    }
+    actions.start();
+    fists.L.state = 'idle'; fists.L.s = 0.72;
+    fists.R.state = 'idle'; fists.R.s = 0.10;
+    manual = true;
+    tick(0, 1, true);
+  }
   document.body.classList.add('loaded');
 }
 
