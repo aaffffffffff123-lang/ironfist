@@ -1252,7 +1252,10 @@ function restoreArm(a, snap) {
     const kind = SCRAP_KINDS.includes(snap.scrap.kind) ? snap.scrap.kind : 'base';
     a.scrapObj = new Scrap(a, snap.scrap.seed, kind);
     a.scrap = a.scrapObj.state;
-    a.scrap.lumpHP = snap.scrap.lump; a.scrap.pipeHP = snap.scrap.pipe;
+    a.scrap.lumpHP = snap.scrap.lump;
+    // 예전 저장의 pipeHP는 짧아진 살 구간을 쇠로 메우던 길이에서 생긴 값이다.
+    // 고정 길이 철권에는 그 구간이 없으므로 새 형상이 실제로 가진 HP까지만 복원한다.
+    a.scrap.pipeHP = Math.min(a.scrap.pipeHP, Number.isFinite(snap.scrap.pipe) ? snap.scrap.pipe : 0);
     if (a.scrap.lumpHP <= 0) a.scrapObj.onDamage('lump', { flyScrapPart: (p) => p.parent && p.parent.remove(p) }, null, null);
   }
 }

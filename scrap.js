@@ -202,7 +202,7 @@ function wireTendril(rng, angle, len, turns) {
 }
 
 export class Scrap {
-  constructor(arm, seed, kind = 'base') {
+  constructor(arm, seed, kind = 'base', options = {}) {
     if (!CACHE) CACHE = buildCache();
     this.arm = arm;
     const rng = this.rng = mulberry(Math.floor(seed));
@@ -212,8 +212,11 @@ export class Scrap {
     const requestedPreview = new URLSearchParams(location.search).get('scrapPreview');
     const previewKind = SCRAP_KINDS.includes(requestedPreview) ? requestedPreview : SCRAP_KINDS.includes(kind) ? kind : 'base';
     this.kind = this.previewKind = previewKind;
-    // 붙이는 자리: 그루터기 끝(cutZ) → 원래 손목(0.004)까지는 쇠파이프
-    const stumpZ = Math.min(arm.cutZ, 0.006);
+    // 철권 자체의 길이는 남은 팔 길이와 무관하게 고정한다. 짧아진 자리를 쇠로
+    // 새로 메우지 않고, 완성된 철권 전체를 현재 그루터기 끝으로 옮겨 붙인다.
+    this.followStump = !options.fillMissing;
+    this.mountZ = this.followStump ? 0.004 : Math.min(arm.cutZ, 0.006);
+    const stumpZ = this.mountZ;
     const wristZ = 0.004;
     const pipeLen = wristZ - stumpZ + 0.02;
     const fullPipeHP = stumpZ < -0.012 ? 30 + pipeLen * 140 : 0;
@@ -632,7 +635,10 @@ export class Scrap {
     else if (previewKind === 'cutlery') this.glow.scale.set(0.48, 0.34, 0.85);
     else this.glow.scale.set(0.95, 0.8, 1.05);
     lump.add(this.glow);
+    this._syncMount();
   }
+  get mountShift() { return this.followStump ? Math.min(this.arm.cutZ, 0.006) - this.mountZ : 0; }
+  _syncMount() { this.group.position.z = this.mountShift; }
   // 맞을 때 부품이 떨어져 나감. 떨어진 개수 반환
   onDamage(hit, fx, wall, contact) {
     let n = 0;
@@ -676,6 +682,7 @@ export class Scrap {
     return n;
   }
   update(dt, time) {
+    this._syncMount();
     if (this.lump) this.lump.rotation.z = Math.sin(time * 13) * 0.004;
     this.heat = Math.max(0, this.heat - dt * 0.12);
     this.glow.material.uniforms.opacity.value = Math.min(0.55, this.heat * 0.6) * (0.85 + Math.sin(time * 9) * 0.15);
