@@ -176,10 +176,12 @@ function poses(side, armObj) {
 }
 
 // ------------------------------------------------------------------ 동작 곡선
-// 내지르기: 처음 한두 프레임 살짝 당겼다가(반동) 점점 빨라져, 가장 빠를 때 벽에 꽂힘
+// 일반타: 앞 40% 동안 확실히 당긴 뒤 가속해 꽂는다. 접촉까지 걸리는 시간은 그대로다.
 function strikeCurve(u, wind) {
-  const a = Math.pow(u, 2.1);
-  return wind ? a - 0.07 * Math.sin(Math.PI * Math.min(1, u / 0.45)) * (1 - u) : a;
+  if (!wind) return Math.pow(u, 2.1);
+  const turn = 0.4, pull = 0.22;
+  if (u < turn) return -pull * smooth(u / turn);
+  return -pull + (1 + pull) * Math.pow((u - turn) / (1 - turn), 1.65);
 }
 // 튕겨 나오기: 처음이 가장 빠르고, 가드 자리를 살짝 지나쳤다 돌아옴
 function reboundCurve(u) { const c1 = 1.15, c3 = c1 + 1, v = u - 1; return 1 + c3 * v * v * v + c1 * v * v; }
@@ -495,8 +497,14 @@ class Fist {
         tmpQ.setFromAxisAngle(AX_Z, ang * (sg < 0 ? 1 : -1)); out.quaternion.multiply(tmpQ);
       }
     }
-    // 반동: 내지르기 직전 손목을 살짝 젖힘
-    if (this.state === 'out' && this.wind) { const w = Math.sin(Math.PI * Math.min(1, this.u / 0.45)) * (1 - this.u); tmpQ.setFromAxisAngle(AX_X, -0.12 * w); out.quaternion.multiply(tmpQ); }
+    // 당길 때 화면 안쪽·위로 모아, 카메라 쪽으로 가까워져도 주먹이 아래·옆으로 사라지지 않게 한다.
+    // 회수 곡선도 가드를 잠깐 지나치므로, 이 보정은 직접 내지르는 일반타에만 적용한다.
+    if (this.state === 'out' && this.wind && s < 0) {
+      const pull = clamp(-s / 0.22, 0, 1);
+      out.position.x += (this.arm.side === 'L' ? 1 : -1) * 0.014 * pull;
+      out.position.y += 0.026 * pull;
+      tmpQ.setFromAxisAngle(AX_X, -0.16 * pull); out.quaternion.multiply(tmpQ);
+    }
     // 손목 튕김: 맞고 나서 주먹이 들리며 팔이 휨
     if (this.flick) { tmpQ.setFromAxisAngle(AX_X, this.flick); out.quaternion.multiply(tmpQ); }
     // 눌림 + 충격 떨림
