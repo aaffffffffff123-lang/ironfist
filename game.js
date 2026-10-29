@@ -1138,7 +1138,7 @@ async function boot() {
   // 숨은 실제 게임 그래픽 시안: 기본 주소와 저장 데이터에는 영향을 주지 않는다.
   const previewOptions = [
     ['base', '기본형 · 비교'], ['wire', '철사 파마'], ['hand', '철근 가짜손'],
-    ['umbrella', '우산 뼈다귀'], ['canchain', '깡통 팔'], ['saw', '톱날 박힘'],
+    ['umbrella', '우산 뼈다귀'], ['canchain', '깡통 팔'],
     ['cutlery', '급식 울버린'],
   ];
   const scrapPreview = QS.get('scrapPreview');
