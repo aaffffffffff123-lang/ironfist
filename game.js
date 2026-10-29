@@ -1137,10 +1137,8 @@ async function boot() {
   ui.ready();
   // 숨은 실제 게임 그래픽 시안: 기본 주소와 저장 데이터에는 영향을 주지 않는다.
   const previewOptions = [
-    ['base', '기본형 · 비교'], ['wire', '철사 파마'], ['bolt', '거대 가로 볼트'],
-    ['kitchen', '주방 폐품'], ['hand', '철근 가짜손'], ['pipes', '배관다발'],
-    ['door', '문짝 부속'], ['bearing', '베어링 우리'], ['clamps', '집게 우리'],
-    ['bicycle', '자전거 부속'], ['heatsink', '방열판'],
+    ['base', '기본형 · 비교'], ['wire', '철사 파마'], ['hand', '철근 가짜손'],
+    ['pipes', '배관다발'], ['clamps', '집게 도배'],
   ];
   const scrapPreview = QS.get('scrapPreview');
   let previewIndex = previewOptions.findIndex(([id]) => id === scrapPreview);
