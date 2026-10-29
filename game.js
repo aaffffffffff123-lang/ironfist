@@ -29,7 +29,7 @@ const HANDS_SPAN = 31040;            // 벽이 다 열린 뒤로는 이만큼 �
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
 const PULL_T = 0.120;                // 일반타 준비: 당기는 자세가 읽힌 뒤 빠르게 내지름
-const PULL_DEPTH = 0.110;            // 칠 때만 몸 쪽으로 깊게 당김(대기 위치는 유지)
+const PULL_DEPTH = 0.075;            // 가드의 팔 방향 그대로 몸 쪽으로 당기는 거리
 const TAP_STRIKE_T = 0.072;          // 당김을 끝낸 뒤에는 짧고 빠르게 내지름
 const BACK_T = 0.2;                  // 벽에서 튕겨 가드로 돌아오는 시간
 const HOLD_T = 0.012;                // 멈춤이 풀린 뒤 벽에 붙어 있는 시간
@@ -175,7 +175,8 @@ function poses(side, armObj) {
     p0.x = -p0.x; p1.x = -p1.x; contact.x = -contact.x;
     q0 = mirrorQ(q0); q1 = mirrorQ(q1);
   }
-  return { p0, q0, p1, q1, D1: s < 0 ? new THREE.Vector3(-D1.x, D1.y, D1.z) : D1, contact };
+  const D0 = AX_Z.clone().applyQuaternion(q0); // 가드의 손목→주먹 방향
+  return { p0, q0, p1, q1, D0, D1: s < 0 ? new THREE.Vector3(-D1.x, D1.y, D1.z) : D1, contact };
 }
 
 // ------------------------------------------------------------------ 동작 곡선
@@ -502,15 +503,10 @@ class Fist {
       const charge = launching ? this.punchCharge : holding ? smooth(clamp((held - CHARGE_START) / (CHARGE_FULL - CHARGE_START), 0, 1)) : 0;
       // 실제 전진 거리와 함께 당김을 풀어, 당긴 자리에서 벽까지 한 번에 곧게 뻗는다.
       const launchFade = launching ? 1 - sc : 1;
-      const pull = (prep * PULL_DEPTH + charge * 0.034) * launchFade;
+      const pull = (prep * PULL_DEPTH + charge * 0.020) * launchFade;
       const sg = this.arm.side === 'L' ? -1 : 1;
-      out.position.addScaledVector(P.D1, -pull);
-      // 화면 가장자리로 숨지 않을 만큼만 안쪽·위로 보정한다.
-      // 좁거나 정사각형인 화면에서도 커진 주먹 전체가 보이게 안쪽 여유를 준다.
-      const pullX = layout.portrait ? 0.68 : clamp(1.46 - camera.aspect * 0.60, 0.60, 0.92);
-      out.position.x -= sg * pull * pullX;
-      out.position.y += pull * (layout.portrait ? 0.62 : 0.90);
-      tmpQ.setFromAxisAngle(AX_X, -(0.24 * prep + 0.13 * charge) * launchFade); out.quaternion.multiply(tmpQ);
+      // 팔의 중립 방향을 거꾸로 따라 당긴다. 안쪽으로 옮기거나 손목을 축으로 팔 전체를 꺾지 않는다.
+      out.position.addScaledVector(P.D0, -pull);
       const sk = skillFx ? skillFx.skill.id : 'shock';
       // 힘을 억지로 붙들고 있는 느낌: 완충에 가까울수록 팔 전체와 손목이 함께 떨린다.
       // 발사 중에는 곧게 뻗는 선이 흐려지지 않게 즉시 끈다.
