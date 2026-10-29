@@ -455,10 +455,19 @@ class Fist {
   pose(out) {
     const P = poses(this.arm.side, this.arm);
     const s = this.s, sc = clamp(s, 0, 1);
-    out.position.lerpVectors(P.p0, P.p1, s);
-    // 휘두르는 호
-    out.position.y += Math.sin(sc * Math.PI) * 0.018;
-    out.quaternion.slerpQuaternions(P.q0, P.q1, sc);
+    const launcher = this.arm.scrapObj?.launchesBody ? this.arm.scrapObj : null;
+    if (launcher) {
+      // 줄자형은 팔을 내지르지 않는다. 가드에 남은 팔에서 몸통만 기존 타격 거리만큼 발사된다.
+      out.position.copy(P.p0); out.quaternion.copy(P.q0);
+      tmpV.copy(P.p1).sub(P.p0); tmpQ.copy(P.q0).invert(); tmpV.applyQuaternion(tmpQ);
+      const driven = Number.isFinite(launcher.previewLaunch) ? launcher.previewLaunch : (this.state === 'idle' ? 0 : sc);
+      launcher.setLaunch(driven, tmpV);
+    } else {
+      out.position.lerpVectors(P.p0, P.p1, s);
+      // 휘두르는 호
+      out.position.y += Math.sin(sc * Math.PI) * 0.018;
+      out.quaternion.slerpQuaternions(P.q0, P.q1, sc);
+    }
     // 충전은 화면 오라가 아니라 실제 자세로 먼저 읽힌다: 더 깊은 당김, 손목 긴장, 미세한 떨림.
     if ((this.inputHeld && this.chargeStart >= 0 && this.state === 'idle') || (this.state === 'out' && this.punchCharge > 0)) {
       const launching = this.state === 'out';
@@ -1138,12 +1147,16 @@ async function boot() {
   // 숨은 실제 게임 그래픽 시안: 기본 주소와 저장 데이터에는 영향을 주지 않는다.
   const previewOptions = [
     ['base', '기본형 · 비교'], ['wire', '철사 파마'], ['hand', '철근 가짜손'],
-    ['pipes', '배관다발'], ['clamps', '집게 도배'],
+    ['pipes', '배관다발'], ['clamps', '집게 도배'], ['umbrella', '우산 뼈다귀'],
+    ['tape', '줄자 몸통포'], ['canchain', '깡통 척추'], ['saw', '톱날 박힘'],
+    ['cutlery', '급식 울버린'],
   ];
   const scrapPreview = QS.get('scrapPreview');
   let previewIndex = previewOptions.findIndex(([id]) => id === scrapPreview);
   if (previewIndex >= 0) {
+    let previewDemo = null, previewRun = 0;
     const mountPreview = (index) => {
+      previewRun++;
       previewIndex = (index + previewOptions.length) % previewOptions.length;
       const kind = previewOptions[previewIndex][0];
       const q = new URLSearchParams(location.search); q.set('scrapPreview', kind);
@@ -1154,6 +1167,7 @@ async function boot() {
       a.scrapObj = new Scrap(a, a.scrapSeed); a.scrap = a.scrapObj.state;
       arms.L.root.visible = true; arms.R.root.visible = false;
       resetArmMotion('L');
+      if (previewDemo) previewDemo.style.display = kind === 'tape' ? 'block' : 'none';
     };
     mountPreview(previewIndex);
     actions.start();
@@ -1193,6 +1207,38 @@ async function boot() {
     nav.addEventListener('pointerdown', (e) => e.stopPropagation());
     nav.addEventListener('pointerup', (e) => e.stopPropagation());
     nav.append(prev, select, next); document.body.appendChild(nav);
+
+    previewDemo = document.createElement('button');
+    previewDemo.type = 'button'; previewDemo.textContent = '몸통 발사 보기';
+    Object.assign(previewDemo.style, {
+      position: 'fixed', left: '50%', bottom: 'calc(max(14px, env(safe-area-inset-bottom)) + 72px)',
+      transform: 'translateX(-50%)', zIndex: '56', height: '42px', padding: '0 18px',
+      border: '1px solid #c79742', borderRadius: '9px', color: '#17100b', background: '#d6a537',
+      boxShadow: '0 7px 22px rgba(0,0,0,.42)', fontSize: '14px', fontWeight: '900', cursor: 'pointer',
+      display: previewOptions[previewIndex][0] === 'tape' ? 'block' : 'none',
+    });
+    const runPreviewDemo = () => {
+      if (previewOptions[previewIndex][0] !== 'tape') return;
+      const token = ++previewRun, obj = arms.L.scrapObj, started = performance.now();
+      if (!obj?.launchesBody) return;
+      const demoFrame = (stamp) => {
+        if (token !== previewRun || arms.L.scrapObj !== obj) return;
+        const t = Math.min(1, (stamp - started) / 1050);
+        let k = 0;
+        if (t >= 0.13 && t < 0.46) k = smooth((t - 0.13) / 0.33) * 1.04;
+        else if (t < 0.58) k = 1 + Math.sin((t - 0.46) / 0.12 * Math.PI * 3) * 0.035 * (1 - (t - 0.46) / 0.12);
+        else if (t < 0.94) k = (1 - smooth((t - 0.58) / 0.36));
+        obj.previewLaunch = k;
+        fists.L.state = 'idle'; fists.L.s = 0.22; tick(0, 1, true);
+        if (t < 1) requestAnimationFrame(demoFrame);
+        else { obj.previewLaunch = null; posePreview(); }
+      };
+      requestAnimationFrame(demoFrame);
+    };
+    previewDemo.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); runPreviewDemo(); });
+    previewDemo.addEventListener('pointerdown', (e) => e.stopPropagation());
+    previewDemo.addEventListener('pointerup', (e) => e.stopPropagation());
+    document.body.appendChild(previewDemo);
   }
   document.body.classList.add('loaded');
 }
