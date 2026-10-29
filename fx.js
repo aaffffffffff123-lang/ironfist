@@ -15,7 +15,6 @@ const DUST = {
   nails:    { dust: 0xfaeedb, grit: 0x6e4a2a, n: 14, g: 10, alpha: 0.55, size: 1.1, gs: 1.0 },
   freezer:  { dust: 0xffffff, grit: 0xf4fbff, n: 20, g: 14, alpha: 0.7, size: 1.3, gs: 1.0 },
   hotplate: { dust: 0xd9d2c8, grit: 0xffb04a, n: 0, g: 12, alpha: 0.0, size: 1.0, gs: 0.8 },   // 연기는 smokeBurst가 맡음
-  slime:    { dust: 0xd8f7b0, grit: 0x8fd23c, n: 0, g: 18, alpha: 0.0, size: 1.0, gs: 1.6 },
   electric: { dust: 0xf2f4f6, grit: 0x7d848b, n: 10, g: 9, alpha: 0.5, size: 1.05, gs: 0.9 },
   spikes:   { dust: 0xeee2d2, grit: 0x6b3f22, n: 8, g: 12, alpha: 0.45, size: 1.0, gs: 1.1, atFist: true },
 };
@@ -262,7 +261,7 @@ class BloodMap {
 export function makeOldMarks(id) {
   const ops = [];
   const R = Math.random, f4 = (v) => +v.toFixed(4), f2 = (v) => +v.toFixed(2);
-  const dripK = id === 'freezer' ? 0.3 : id === 'hotplate' ? 0.22 : id === 'slime' ? 0 : 1;
+  const dripK = id === 'freezer' ? 0.3 : id === 'hotplate' ? 0.22 : 1;
   const boost = id === 'nails' ? 1.35 : id === 'hotplate' ? 1.8 : 1;
   // 다녀간 사람마다 선 자리·키·어깨너비가 달라 주먹 자리가 조금씩 다름. 앞사람일수록 오래돼 바램
   const people = 3 + Math.floor(R() * 3);
@@ -540,7 +539,7 @@ export class FX {
     this.flying = [];          // 날아가는 살점·뼛조각·부품(메시)
     this.stuckGroup = new THREE.Group(); scene.add(this.stuckGroup);
     this.stuckList = [];
-    // 먼저 다녀간 사람들이 남긴 마른 살점(못·꼬챙이·철판·슬라임)
+    // 먼저 다녀간 사람들이 남긴 마른 살점(못·꼬챙이·철판)
     this.oldGroup = new THREE.Group(); scene.add(this.oldGroup);
     this.driedMat = new THREE.MeshStandardMaterial({ color: 0x3d1b12, roughness: 0.86, metalness: 0 });
     this.charMat = new THREE.MeshStandardMaterial({ color: 0x1d130f, roughness: 0.95, metalness: 0 });
@@ -549,7 +548,6 @@ export class FX {
     this.steam = new Puffs(120, { color: 0xffffff, size: 0.025, opacity: 0.25 }); scene.add(this.steam.obj);
     this.sparkP = new Puffs(200, { color: 0xffd28a, size: 0.004, additive: true, opacity: 1 }); scene.add(this.sparkP.obj);
     this.sparkB = new Puffs(200, { color: 0x9fd8ff, size: 0.005, additive: true, opacity: 1 }); scene.add(this.sparkB.obj);
-    this.bubbleP = new Puffs(150, { color: 0xeaffd8, size: 0.005, opacity: 0.8 }); scene.add(this.bubbleP.obj);
     this.frost = new Puffs(150, { color: 0xf2f8ff, size: 0.012, opacity: 0.6 }); scene.add(this.frost.obj);
     // 벽에 맞는 순간 터지는 먼지·부스러기(색은 벽마다)
     this.dust = new Puffs(160, { color: 0xe4ded3, size: 0.014, opacity: 0.4 }); scene.add(this.dust.obj);
@@ -625,7 +623,6 @@ export class FX {
       this.oldGroup.add(bit(OLD_FIST_AT.x + rnd(-0.003, 0.003), OLD_FIST_AT.y - 0.006, -D + rnd(0.05, 0.07), 0.006, this.driedMat));
     }
     if (id === 'hotplate') for (let i = 0; i < 4; i++) this.oldGroup.add(bit(rnd(-0.1, 0.1), rnd(-0.14, 0.05), -D + 0.0015, rnd(0.003, 0.0055), this.charMat, 0.3));
-    if (id === 'slime' && wall.addFloater) for (let i = 0; i < 3; i++) { const m = bit(rnd(-0.12, 0.12), rnd(-0.16, 0.06), 0, rnd(0.004, 0.007), this.driedMat); m.castShadow = false; wall.addFloater(m); }
   }
   saveWall(id) {
     this.G.decals = this.G.decals || {}; this.G.stuck = this.G.stuck || {};
@@ -649,13 +646,13 @@ export class FX {
     const cx = c.x, cy = c.y;
     const fistPrint = !scrapHit && arm.I < 0.5 && arm.crushZ > 0.09;   // 주먹 모양이 남아 있을 때만 너클 자국
     // 살 주먹은 첫 대부터 옅은 너클 자국(살갗이 쓸린 자리)이 남고 칠수록 진해짐
-    if (blood > 0.12 || (fistPrint && W.id !== 'slime' && W.id !== 'spikes')) {
+    if (blood > 0.12 || (fistPrint && W.id !== 'spikes')) {
       // 타격면 핏자국
       // 살 주먹이면 너클 자국(가로로 눕힘, 팔 쪽으로 살짝 기울임), 아니면 그냥 튄 피
       const tilt = (arm.side === 'L' ? -1 : 1) * rnd(0.05, 0.3);
       this.blood.splat(cx + rnd(-0.008, 0.008), cy + rnd(-0.008, 0.008), (fistPrint ? 0.03 : 0.012) + blood * (fistPrint ? 0.012 : 0.022), { dark: Math.random() * 0.3, knuckle: fistPrint, rot: fistPrint ? tilt : undefined, alpha: fistPrint ? clamp(0.22 + blood * 1.6, 0.22, 0.95) : clamp(0.3 + blood * 0.9, 0.3, 0.95) });
       // 흘러내림: 언 벽은 짧게 얼어붙고, 달군 철판은 지글지글 말라 버림
-      const dripK = W.id === 'freezer' ? 0.22 : W.id === 'hotplate' ? 0.12 : W.id === 'slime' ? 0 : 1;
+      const dripK = W.id === 'freezer' ? 0.22 : W.id === 'hotplate' ? 0.12 : 1;
       if (dripK && blood > 0.6 && Math.random() < 0.45) this.blood.drip(cx + rnd(-0.02, 0.02), cy - rnd(0.0, 0.015), rnd(0.05, 0.22) * dripK, rnd(0.002, 0.0045));
     }
     // 핏방울
@@ -847,7 +844,7 @@ export class FX {
       this.spawnDrop(c.x + rnd(-0.012, 0.012), c.y + rnd(-0.01, 0.01), wallZ + rnd(0.01, 0.03), Math.cos(a) * sp, Math.sin(a) * sp * 0.8 + rnd(-0.1, 0.7), rnd(-0.2, 0.7), rnd(0.0008, 0.0026));
     }
     this.blood.splat(c.x + rnd(-0.006, 0.006), c.y + rnd(-0.006, 0.006), 0.022 + 0.012 * k, { dark: Math.random() * 0.4, alpha: 0.95 });
-    if (k > 0.9 && Math.random() < 0.7 && this.wall.def.id !== 'slime') this.blood.drip(c.x + rnd(-0.015, 0.015), c.y - rnd(0, 0.01), rnd(0.08, 0.22) * (this.wall.def.id === 'freezer' ? 0.25 : 1), rnd(0.0025, 0.005));
+    if (k > 0.9 && Math.random() < 0.7) this.blood.drip(c.x + rnd(-0.015, 0.015), c.y - rnd(0, 0.01), rnd(0.08, 0.22) * (this.wall.def.id === 'freezer' ? 0.25 : 1), rnd(0.0025, 0.005));
   }
   // 살을 뚫고 나온 뼈 자리에서 피가 찍 (p: 월드 좌표)
   spurt(p, n = 12) {
@@ -885,9 +882,6 @@ export class FX {
   }
   smokeBurst(c, k) {
     for (let i = 0; i < 10 * k; i++) this.smoke.emit({ x: c.x + rnd(-0.03, 0.03), y: c.y + rnd(-0.02, 0.03), z: c.z + rnd(0.01, 0.05), vx: rnd(-0.05, 0.05), vy: rnd(0.12, 0.32), vz: rnd(0.0, 0.08), drag: 0.6, life: rnd(0.9, 1.8), size: rnd(0.018, 0.035), grow: 3.0, a: 0.22 });
-  }
-  bubbles(c, n) {
-    for (let i = 0; i < n; i++) this.bubbleP.emit({ x: c.x + rnd(-0.03, 0.03), y: c.y + rnd(-0.03, 0.02), z: c.z + rnd(-0.01, 0.01), vx: rnd(-0.02, 0.02), vy: rnd(0.02, 0.08), vz: 0, life: rnd(0.8, 2.0), size: rnd(0.003, 0.008), a: 0.8 });
   }
   frostPuff(arm, n) {
     const c = this.lastContact || new THREE.Vector3();
@@ -960,8 +954,6 @@ export class FX {
           this.capStuck(this.stuckScrap, f.m, 40);
           continue;
         }
-        // 슬라임 벽: 살점·뼛조각이 슬라임 속에 떠 있음
-        if (this.wall && this.wall.addFloater) { this.scene.remove(f.m); f.m.castShadow = false; this.wall.addFloater(f.m); continue; }
         this.scene.remove(f.m);
         this.stickChunk(new THREE.Vector3(f.m.position.x, f.m.position.y, wallZ + f.size * 0.3), f.size, f.kind === 'nail' ? 'nail' : f.kind, [f.m.rotation.x, f.m.rotation.y, f.m.rotation.z]);
         this.blood.drop(f.m.position.x, f.m.position.y, f.size * 0.9);
@@ -972,7 +964,7 @@ export class FX {
     }
     this.flying = keep;
     this.blood.update(dt, time);
-    this.smoke.update(dt); this.steam.update(dt); this.sparkP.update(dt); this.sparkB.update(dt); this.bubbleP.update(dt); this.frost.update(dt);
+    this.smoke.update(dt); this.steam.update(dt); this.sparkP.update(dt); this.sparkB.update(dt); this.frost.update(dt);
     this.dust.update(rdt); this.grit.update(rdt);
     this.updatePowerImpact(rdt);
   }
