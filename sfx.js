@@ -402,28 +402,6 @@ function design(S) {
     return out;
   }, 3);
 
-  // 슬라임 뿌직 / 쪽(빨아들임)
-  put('gloop', () => {
-    const out = S.buf(0.5);
-    for (let k = 0; k < 6; k++) S.add(out, S.sweep(0.08, rnd(140, 220), rnd(380, 620), -0.02, rnd(0.02, 0.04)), rnd(0, 0.1), rnd(0.4, 0.8));
-    const w = S.filt(S.noise(Math.floor(0.4 * S.sr)), 'bp', (t) => 250 + 500 * Math.abs(Math.sin(t * 22)), 3);
-    S.add(out, S.mul(w, S.envExp(w.length, 0.01, 0.09)), 0, 0.9);
-    S.add(out, S.sweep(0.2, 90, 45, 0.04, 0.06), 0, 0.6);
-    return out;
-  }, 4);
-  put('suction', () => {
-    const out = S.buf(0.35);
-    const w = S.filt(S.noise(Math.floor(0.25 * S.sr)), 'bp', (t) => 300 + 1600 * Math.min(1, t / 0.2), 4);
-    S.add(out, S.mul(w, S.envExp(w.length, 0.12, 0.03)), 0, 0.8);
-    S.add(out, S.sweep(0.06, 180, 620, -0.03, 0.015), 0.19, 1.0);
-    return out;
-  }, 3);
-  put('fizz', () => {
-    const out = S.buf(1.2);
-    S.add(out, S.grains(1.2, 300, 4000, 11000, 0.0002, 0.0006, (r) => r * 1.15, 2), 0, 0.6);
-    return out;
-  }, 2);
-
   // 전기 지지직
   put('zap', () => {
     const d = rnd(0.32, 0.45), out = S.buf(d);
@@ -686,12 +664,6 @@ function ambientBuffers(S) {
     const cr = S.filt(S.noise(n), 'hp', 3000, 0.7); for (let i = 0; i < n; i++) o[i] += cr[i] * (Math.random() < 0.002 ? 1.2 : 0.01);
     return o;
   });
-  loops.slime = mk(4, (d) => {
-    const o = S.buf(d);
-    for (let k = 0; k < 40; k++) S.add(o, S.sweep(0.05, rnd(160, 260), rnd(400, 700), -0.02, rnd(0.01, 0.025)), rnd(0, d - 0.1), rnd(0.05, 0.2));
-    S.add(o, S.filt(S.noise(o.length), 'lp', 300, 0.7), 0, 0.15);
-    return o;
-  });
   return loops;
 }
 
@@ -721,8 +693,8 @@ function pcm16(b64) {
 }
 
 // 벽마다 어떤 재질 소리를 섞는지
-const MAT = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', slime: null, electric: 'matMesh', spikes: null };
-const THUD = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', slime: null, electric: 'matMesh', spikes: null };
+const MAT = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', electric: 'matMesh', spikes: null };
+const THUD = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', electric: 'matMesh', spikes: null };
 
 // ------------------------------------------------------------------ 재생
 export class SFX {
@@ -858,10 +830,10 @@ export class SFX {
   }
   ambience(id) {
     if (!this.ready) { this.pendingAmb = id; return; }
-    const key = { freezer: 'freezer', hotplate: 'hotplate', electric: 'electric', slime: 'slime' }[id] || 'room';
+    const key = { freezer: 'freezer', hotplate: 'hotplate', electric: 'electric' }[id] || 'room';
     if (this.ambSrc) { try { this.ambGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2); this.ambSrc.stop(this.ctx.currentTime + 1); } catch (e) {} }
     const c = this.ctx, src = c.createBufferSource(); src.buffer = this.amb[key]; src.loop = true;
-    const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime({ room: 0.05, freezer: 0.10, hotplate: 0.16, electric: 0.07, slime: 0.10 }[key], c.currentTime, 0.4);
+    const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime({ room: 0.05, freezer: 0.10, hotplate: 0.16, electric: 0.07 }[key], c.currentTime, 0.4);
     src.connect(g); g.connect(this.master); src.start();
     this.ambSrc = src; this.ambGain = g;
   }
@@ -933,7 +905,6 @@ export class SFX {
       case 'nails': if (scrap) this.play('ping', 0.7, { delay: 0.006, rate: 1.25 }); else this.play('impale', 0.9, { delay: 0.005 }); break;
       case 'freezer': this.play('frost', 0.7, { delay: 0.005 }); break;
       case 'hotplate': this.play('sizzle', scrap ? 0.45 : 0.95, { delay: 0.01, jitter: 0.06 }); break;
-      case 'slime': this.play('gloop', 1.0); this.play('fizz', 0.4, { delay: 0.3 }); break;
       case 'electric': this.play('zap', 1.0); break;
       case 'spikes': if (scrap) { this.play('ping', 0.8, { rate: 0.8 }); this.play('clank', 0.6, { delay: 0.02, rate: 0.85 }); } else this.play('spike', 1.0); break;
     }
