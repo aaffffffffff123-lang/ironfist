@@ -8,14 +8,14 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 // 벽 정의 — dmg: 살 손실(0~1 단위), scrapDmg: 고철 피해, mult: 참을성 배율, fear: 처음 열었을 때 대기 중 주먹 떨림
 // pace·space: 이 벽에서 살·고철이 닳는 빠르기. 어느 벽이든 맨손 한 판이 보통 속도로 2분 안팎, 고철 한 판이 1분 안팎이 되게 맞춤
 export const WALLS = [
-  { id: 'cement', name: '시멘트 벽', desc: '기본 벽.', mult: 1.0, dmg: 0.0115, scrapDmg: 8, pace: 0.44, space: 0.35, fear: 0.0, kind: {} },
-  { id: 'gravel', name: '자갈 박힌 벽', desc: '울퉁불퉁. 칠 때마다 살갗이 갈려 나감.', mult: 1.6, dmg: 0.0135, scrapDmg: 9, pace: 0.375, space: 0.3, fear: 0.15, kind: { abr: 0.45 } },
-  { id: 'glass', name: '소주병 조각 벽', desc: '유리가 손에 박힌 채 남고, 박힌 데서 피가 계속 새서 팔이 저절로 닳음.', mult: 3.4, dmg: 0.0150, scrapDmg: 10, pace: 0.28, space: 0.28, fear: 0.45, kind: { cut: 0.75, punct: 1 } },
-  { id: 'nails', name: '못 박힌 벽', desc: '주먹이 못에 걸렸다가 잠깐 뒤 뜯겨 나옴.', mult: 5.6, dmg: 0.0160, scrapDmg: 11, pace: 0.45, space: 0.35, fear: 0.6, kind: { punct: 3 } },
-  { id: 'freezer', name: '냉동창고 벽', desc: '언 쇠에 살이 쩍 들러붙음. 뗄 때 가죽이 벗겨짐.', mult: 6.6, dmg: 0.0170, scrapDmg: 10, pace: 0.38, space: 0.3, fear: 0.6, kind: {} },
-  { id: 'hotplate', name: '달군 철판', desc: '살이 눌어붙어 탐. 데인 손은 다음 주먹이 한 박자 늦게 나감.', mult: 9.0, dmg: 0.0185, scrapDmg: 12, pace: 0.28, space: 0.23, fear: 0.75, kind: { burn: 0.45 } },
-  { id: 'electric', name: '전기 벽', desc: '감전되면 팔이 경련하며 혼자 몇 대 더 침.', mult: 15.5, dmg: 0.0200, scrapDmg: 14, pace: 0.085, space: 0.072, fear: 0.9, kind: { elec: 0.55 } },
-  { id: 'spikes', name: '쇠꼬챙이 가시벽', desc: '주먹을 뚫고 팔뚝까지 꿰임. 같은 쪽을 눌러 뜯어내야 함.', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
+  { id: 'cement', name: '시멘트 벽', mult: 1.0, dmg: 0.0115, scrapDmg: 8, pace: 0.44, space: 0.35, fear: 0.0, kind: {} },
+  { id: 'gravel', name: '자갈 박힌 벽', mult: 1.6, dmg: 0.0135, scrapDmg: 9, pace: 0.375, space: 0.3, fear: 0.15, kind: { abr: 0.45 } },
+  { id: 'glass', name: '소주병 조각 벽', mult: 3.4, dmg: 0.0150, scrapDmg: 10, pace: 0.28, space: 0.28, fear: 0.45, kind: { cut: 0.75, punct: 1 } },
+  { id: 'nails', name: '못 박힌 벽', mult: 5.6, dmg: 0.0160, scrapDmg: 11, pace: 0.45, space: 0.35, fear: 0.6, kind: { punct: 3 } },
+  { id: 'freezer', name: '냉동창고 벽', mult: 6.6, dmg: 0.0170, scrapDmg: 10, pace: 0.38, space: 0.3, fear: 0.6, kind: {} },
+  { id: 'hotplate', name: '달군 철판', mult: 9.0, dmg: 0.0185, scrapDmg: 12, pace: 0.28, space: 0.23, fear: 0.75, kind: { burn: 0.45 } },
+  { id: 'electric', name: '전기 벽', mult: 15.5, dmg: 0.0200, scrapDmg: 14, pace: 0.085, space: 0.072, fear: 0.9, kind: { elec: 0.55 } },
+  { id: 'spikes', name: '쇠꼬챙이 가시벽', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
 ];
 // 가시벽에 먼저 다녀간 사람이 남긴 고철 주먹이 꿰여 있는 꼬챙이 자리(벽 좌표)
 export const OLD_FIST_AT = { x: -0.0975, y: 0.135 };

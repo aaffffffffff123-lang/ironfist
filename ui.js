@@ -41,19 +41,19 @@ export class UI {
       // 브라우저가 소리를 허용한 첫 입력에서 로고를 한 번 찍어 누른 뒤 들어간다.
       this._titleTimer = setTimeout(() => this.A.start(), 330);
     });
-    $('#btnNew').addEventListener('click', () => { if (confirm('처음부터 다시 할까요? 쌓은 참을성과 열린 벽이 모두 사라집니다.')) this.A.newGame(); });
+    $('#btnNew').addEventListener('click', () => { if (confirm('처음부터 다시?')) this.A.newGame(); });
     this.el.sound.addEventListener('click', (e) => { e.stopPropagation(); const on = this.A.isMuted(); this.A.toggleSound(on); this.syncSound(); });
     $('#btnNext').addEventListener('click', () => {
       if (this.A.canStart()) this.A.start();
       else { this.deny(); this.renderShop(); }
     });
     this.syncSound();
-    $('#ctrlHint').textContent = touch ? '화면 좌·우: 짧게 타격 · 길게 눌렀다 떼면 모아치기' : 'F · J / 마우스 좌·우: 짧게 타격 · 길게 눌렀다 떼면 모아치기';
+    $('#ctrlHint').textContent = touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J / 마우스 좌·우 · 짧게: 타격 · 길게: 모아치기';
   }
   syncSound() { this.el.sound.classList.toggle('off', this.A.isMuted()); }
   ready() {
     const fresh = !this.hadSave || (this.G.stats.rounds === 0 && !(this.G.endure > 0));
-    $('#btnStart').textContent = fresh ? '타격 개시' : '계속 타격';
+    $('#btnStart').textContent = fresh ? '시작' : '계속';
     $('#btnNew').style.display = fresh ? 'none' : '';
     this.el.title.inert = false;
     this.el.title.setAttribute('aria-hidden', 'false');
@@ -97,14 +97,10 @@ export class UI {
     });
     return k;
   }
-  goalFull(g) {
-    this.say(g.kind === 'wall' ? '참을성을 길렀습니다. 이 판이 끝나면 다음 벽이 열립니다' : '참을성을 길렀습니다. 이 판이 끝나면 양손이 새로 생깁니다', 4200);
-  }
   hint(id) {
     const txt = {
-      controls: touch ? '짧게 누르면 타격 · 길게 눌렀다 떼면 모아치기' : 'F · J를 짧게 누르면 타격 · 길게 눌렀다 떼면 모아치기',
-      stuck: '잠깐 붙었다가 저절로 떨어집니다',
-      pinned: '팔이 꿰였습니다. 같은 쪽을 연달아 눌러 빼세요',
+      controls: touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J · 짧게: 타격 · 길게: 모아치기',
+      pinned: '같은 쪽 연타',
     }[id];
     if (!txt) return;
     this.say(txt);
@@ -129,15 +125,15 @@ export class UI {
     if (w) {
       $('#openedSw').style.background = SWATCH[w.id];
       $('#openedSw').style.display = '';
-      $('#openedTitle').textContent = '새 벽이 열렸습니다';
+      $('#openedTitle').textContent = '새 벽';
       $('#openedName').textContent = w.name;
-      $('#openedNote').textContent = `양손이 새로 생겼습니다 · 모아치기: ${SKILL_OF[w.id]?.name || ''}`;
+      $('#openedNote').textContent = SKILL_OF[w.id]?.name ? `모아치기 · ${SKILL_OF[w.id].name}` : '';
       op.hidden = false;
     } else if (round.fresh) {
       $('#openedSw').style.display = 'none';
-      $('#openedTitle').textContent = '양손이 새로 생겼습니다';
+      $('#openedTitle').textContent = '새 손';
       $('#openedName').textContent = '';
-      $('#openedNote').textContent = '참을성이 다시 쌓이면 또 새 손이 생깁니다';
+      $('#openedNote').textContent = '';
       op.hidden = false;
     } else op.hidden = true;
     clearTimeout(this._ht);
@@ -156,7 +152,7 @@ export class UI {
     const k = Math.max(0, Math.min(1, (g.endure - g.from) / Math.max(1, g.to - g.from)));
     $('#goalLabel').textContent = g.kind === 'wall' ? '다음 벽' : '새 손까지';
     $('#goalName').textContent = g.kind === 'wall' ? g.wall.name : '';
-    $('#goalLeft').textContent = k >= 1 ? '다 참' : `${fmt(g.to - g.endure)} 더`;
+    $('#goalLeft').textContent = k >= 1 ? '' : `${fmt(g.to - g.endure)} 더`;
     const key = g.kind + ':' + g.from;
     setBar($('#goalFill'), k, key !== this._shopKey);
     this._shopKey = key;
@@ -168,10 +164,9 @@ export class UI {
       const card = document.createElement('div');
       card.className = 'arm' + (info.fist ? ' ready' : '');
       card.dataset.side = side;
-      const state = info.scrap ? '철권 장착 완료' : info.fist ? (info.I < 0.02 ? '맨손 준비' : '손상된 맨손') : '장착 대기';
-      const primary = info.fist ? '<div class="armReady">타격 준비 완료</div>' :
+      const primary = info.fist ? '' :
         '<button class="btn sub" data-act="scrap"><span>철권 장착</span></button>';
-      card.innerHTML = `<div class="armHead"><b>${label}</b><span class="armState">${state}</span></div><div class="armBtns">${primary}</div>`;
+      card.innerHTML = `<div class="armHead"><b>${label}</b></div>${primary ? `<div class="armBtns">${primary}</div>` : ''}`;
       card.querySelector('[data-act=scrap]')?.addEventListener('click', () => {
         const kind = A.scrap(side);
         if (!kind) this.deny();
@@ -183,7 +178,7 @@ export class UI {
     // 벽은 지금 고른 것만 먼저 보여 주고, 목록은 필요할 때 펼친다.
     const selected = this.WALLS.find((w) => w.id === G.wall);
     $('#sWallName').textContent = selected ? selected.name : '';
-    $('#sWallMult').textContent = selected ? `모아치기: ${SKILL_OF[selected.id]?.name || ''}` : '';
+    $('#sWallMult').textContent = selected ? `모아치기 · ${SKILL_OF[selected.id]?.name || ''}` : '';
     const next = A.nextWall ? A.nextWall() : null;
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
@@ -194,9 +189,9 @@ export class UI {
       row.className = 'wall' + (cur ? ' cur' : '') + (owned ? ' owned' : ' locked');
       row.disabled = cur || !owned;
       const right = cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>잠김</em>';
-      const note = isNext ? `참을성 ${fmt(Math.max(0, g.to - g.endure))} 더` : !owned ? '앞 벽부터' : '';
+      const note = isNext ? `참을성 ${fmt(Math.max(0, g.to - g.endure))} 더` : '';
       row.innerHTML = `<span class="sw" style="background:${SWATCH[w.id]}"></span>
-        <span class="wt"><b>${w.name}</b><span class="sk">모아치기: ${sk ? sk.name : ''}</span><small>${w.desc}</small></span>
+        <span class="wt"><b>${w.name}</b><span class="sk">${sk ? sk.name : ''}</span></span>
         <span class="wp">${right}${note ? '<small>' + note + '</small>' : ''}</span>`;
       row.addEventListener('click', () => {
         if (cur || !owned) return;
@@ -205,11 +200,9 @@ export class UI {
       });
       list.appendChild(row);
     }
-    const left = A.armInfo('L').fist, right = A.armInfo('R').fist;
     const btn = $('#btnNext');
     btn.disabled = !A.canStart();
-    btn.textContent = left && right ? '양팔 타격 개시' : left ? '왼팔 타격 개시' : right ? '오른팔 타격 개시' : '철권 장착 필요';
-    $('#nextNote').textContent = left && right ? '' : left || right ? '다른 쪽도 장착하거나, 한쪽만으로 시작하세요.' : '한쪽만 장착해도 시작할 수 있습니다.';
+    btn.textContent = '시작';
   }
   mountImpact(side) {
     const card = $(`.arm[data-side="${side}"]`), sheet = $('.sheet');

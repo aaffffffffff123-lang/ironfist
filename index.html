@@ -124,14 +124,11 @@ body.playing #sound{display:none}
 .arm.ready{border-color:#b4c2a1;background:#fafcf6}
 .armHead{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
 .armHead b{font-size:16px}
-.armState{font-size:13px;color:var(--ink2)}
-.arm.ready .armState{color:#465d28;font-weight:700}
 .armBtns{display:flex;flex-direction:column;gap:8px}
 .btn.sub{padding:11px 6px;font-size:13px;border-radius:10px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;background:var(--hi);color:var(--ink);box-shadow:none;font-weight:900;min-height:58px;width:100%;letter-spacing:0}
 .btn.sub em{font-style:normal;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 .btn.sub:not(:disabled):active{background:#edbd00}
 .btn.sub:disabled{opacity:1;background:#f0eee9;color:#99958c}
-.armReady{min-height:58px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#eaf0e2;color:#465d28;font-size:13px;font-weight:700}
 .wallPicker{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
 .wallPicker summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;min-height:36px}
 .wallPicker summary::-webkit-details-marker{display:none}
@@ -158,13 +155,11 @@ body.playing #sound{display:none}
 .wall .wp small{font-size:10px;color:var(--ink2)}
 .next{flex-shrink:0;position:relative;padding:12px 20px calc(14px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:8px}
 .next .btn{width:100%;font-size:17px;padding:15px 8px}
-#nextNote{font-size:12px;color:var(--ink2);font-weight:500;line-height:1.5;text-align:center}
-#nextNote:empty{display:none}
 /* 좁은 화면: 벽 이름을 참을성 막대 아래 줄로 */
 @media (max-width:560px){#wallName{top:calc(56px + env(safe-area-inset-top))}}
 @media (max-width:380px){.shopBody{padding:16px 12px}.next{padding-left:12px;padding-right:12px}.arm{padding:10px 7px}.wall .sw{display:none}#endureBox .bar{width:78px}}
 </style>
-<link rel="stylesheet" href="forge-ui.css?v=4">
+<link rel="stylesheet" href="forge-ui.css?v=5">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -188,7 +183,7 @@ body.playing #sound{display:none}
 <section id="title" aria-hidden="true" inert>
   <h1 class="logo"><img src="title-logo.webp?v=forge1" alt="鉄拳" width="1400" height="700" draggable="false" fetchpriority="high"></h1>
   <div class="tbtns">
-    <button class="btn" id="btnStart">타격 개시</button>
+    <button class="btn" id="btnStart">시작</button>
     <button class="btn ghost" id="btnNew">처음부터</button>
   </div>
   <div id="ctrlHint"></div>
@@ -216,7 +211,7 @@ body.playing #sound{display:none}
         <div class="walls" id="sWalls"></div>
       </details>
     </div>
-    <div class="next"><span id="nextNote" aria-live="polite"></span><button class="btn" id="btnNext" disabled>철권 장착 필요</button></div>
+    <div class="next"><button class="btn" id="btnNext" disabled>시작</button></div>
   </div>
 </section>
 
@@ -224,8 +219,8 @@ body.playing #sound{display:none}
 <div id="err"></div>
 
 <!-- ?v= : 고친 파일을 올렸을 때 예전 파일이 브라우저 캐시에서 섞여 나오지 않게 -->
-<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=7","./fx.js":"./fx.js?v=5","./sfx.js":"./sfx.js?v=15","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=9","./scrap.js":"./scrap.js?v=14","./ui.js":"./ui.js?v=13","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
-<script type="module" src="./game.js?v=29"></script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=7","./fx.js":"./fx.js?v=5","./sfx.js":"./sfx.js?v=15","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=10","./scrap.js":"./scrap.js?v=14","./ui.js":"./ui.js?v=14","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
+<script type="module" src="./game.js?v=30"></script>
 </body>
 </html>
 

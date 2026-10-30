@@ -663,7 +663,7 @@ function onImpact(fist, now) {
     if (fist.barrage > 0) { fist.state = 'rush'; fist.rushT = fist.rushT0 = 0.026; }
     else { fist.rushing = false; fist.aimOff.set(0, 0, 0); fist.state = 'spasm'; fist.spasm = 0; fist.spasmT = fist.spasmT0 = 0.05; }
   }
-  else if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckT = 0; fist.stuckFor = react.releaseAfter || 0.28; showHint('stuck'); }
+  else if (react.stick === 'stuck') { fist.state = 'stuck'; fist.stuckT = 0; fist.stuckFor = react.releaseAfter || 0.28; }
   else if (react.stick === 'pinned') { fist.state = 'pinned'; fist.pinT = react.pin || 2; showHint('pinned'); }
   else if (react.spasm && !fist.autoPunch) { fist.state = 'spasm'; fist.spasm = react.spasm; fist.spasmT = fist.spasmT0 = 0.06; }
   else if (fist.autoPunch && fist.spasm > 0) { fist.state = 'spasm'; fist.spasmT = fist.spasmT0 = 0.07; }
@@ -767,8 +767,7 @@ function addEndure(n, bonus) {
   G.endure += n; round.endured += n; G.stats.total += n;
   const g = goal();
   ui.endure(g, bonus);
-  // 판 도중에 다 차면 한 번만 알림. 다음 벽(또는 새 손)은 이 판이 끝날 때 열림
-  if (!round.full && G.endure >= g.to) { round.full = true; ui.goalFull(g); }
+  if (!round.full && G.endure >= g.to) round.full = true;
 }
 function nextWall() { return WALLS.find((w) => !G.owned.includes(w.id)) || null; }
 // 지금 채우는 막대: 가장 높은 벽을 연 뒤로 다음 벽까지, 벽이 다 열린 뒤로는 새 손까지
@@ -1284,10 +1283,7 @@ const actions = {
     ui.endure(goal());
     render();
     ui.hidePanels(); ui.hud(true);
-    // 처음 치는 벽이면 이 벽의 모아치기를 한 줄로 알려 줌(처음 시작이면 조작 안내가 먼저)
-    const sk = SKILL_OF[G.wall];
     if (!G.seenHints.controls) showHint('controls');
-    else if (sk && sk.id !== 'shock' && !G.seenSkill[sk.id]) { G.seenSkill[sk.id] = true; ui.say(`새 모아치기: ${sk.name}`); save(); }
     return true;
   },
   newGame() {

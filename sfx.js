@@ -886,7 +886,7 @@ export class SFX {
     if (opts.verb !== false) { const s = c.createGain(); s.gain.value = opts.verbAmt ?? 1; g.connect(s); s.connect(this.verb); }
     src.start(c.currentTime + (opts.delay || 0));
   }
-  // 자동재생 제한 때문에 페이지 로드 순간이 아니라 첫 '타격 개시' 입력과 정확히 맞춘다.
+  // 자동재생 제한 때문에 페이지 로드 순간이 아니라 첫 '시작' 입력과 정확히 맞춘다.
   titleImpact() {
     if (this._titleImpactPlayed) return;
     this._titleImpactPlayed = true;
