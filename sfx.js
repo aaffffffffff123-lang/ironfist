@@ -204,7 +204,7 @@ function design(S) {
     S.add(o, ring, 0.14, 0.12);
     return S.filt(S.sat(o, 1.15), 'hp', 240, 0.7);
   }, 4);
-  // 입장음: 접촉음이 주역인 짧은 모루 타격. 장착음과 분리해 다른 연출은 유지한다.
+  // 입장·장착용 모루 타격. 접촉음이 주역이고 잔향은 짧게 퍼진다.
   put('titleClang', () => {
     const o = S.buf(0.72);
     const contact = S.filt(S.filt(S.noise(Math.floor(0.075 * S.sr)), 'hp', 720, 0.7), 'lp', 8500, 0.7);
@@ -896,8 +896,8 @@ export class SFX {
   equip(kind, side = 'L') {
     const pan = side === 'L' ? -0.32 : 0.32;
     this.play('mountLock', 0.55, { pan, rate: 1, jitter: 0.015, verbAmt: 0.22 });
-    this.play('forgeHit', 1.0, { pan, delay: 0.055, rate: 1, jitter: 0.012, verbAmt: 0.5 });
-    this.play('forgeHit', 0.9, { pan, delay: 0.3, rate: 0.96, jitter: 0.012, verbAmt: 0.54 });
+    this.play('titleClang', 1.18, { pan, delay: 0.055, rate: 1, jitter: 0.008, verb: false });
+    this.play('titleClang', 1.06, { pan, delay: 0.3, rate: 1, jitter: 0.008, verb: false });
     const cheap = {
       base: ['clank', 0.18, 0.86],
       wire: ['wire', 0.24, 1.12],
