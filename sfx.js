@@ -206,12 +206,15 @@ function design(S) {
   }, 4);
   // 입장음: 접촉음이 주역인 짧은 모루 타격. 장착음과 분리해 다른 연출은 유지한다.
   put('titleClang', () => {
-    const o = S.buf(0.62);
+    const o = S.buf(0.72);
     const contact = S.filt(S.filt(S.noise(Math.floor(0.075 * S.sr)), 'hp', 720, 0.7), 'lp', 8500, 0.7);
     S.mul(contact, S.envExp(contact.length, 0.00008, 0.011));
     S.add(o, contact, 0, 1.6);
-    const weight = S.filt(S.noise(Math.floor(0.055 * S.sr)), 'bp', 530, 0.65);
-    S.add(o, S.mul(weight, S.envExp(weight.length, 0.0001, 0.009)), 0, 0.7);
+    const weight = S.filt(S.noise(Math.floor(0.09 * S.sr)), 'bp', 530, 0.65);
+    S.add(o, S.mul(weight, S.envExp(weight.length, 0.0001, 0.015)), 0, 0.85);
+    // 음정이 내려가는 북소리 대신 조밀한 저중역 충격으로 모루의 질량을 더한다.
+    const body = S.filt(S.filt(S.noise(Math.floor(0.16 * S.sr)), 'hp', 90, 0.65), 'lp', 950, 0.7);
+    S.add(o, S.mul(S.sat(body, 1.7), S.envExp(body.length, 0.0003, 0.028)), 0.0004, 1.0);
 
     // 한 음이 길게 남지 않도록 고유진동을 여러 대역으로 흩뜨리고 빠르게 감쇠시킨다.
     const detune = rnd(0.985, 1.015);
@@ -233,7 +236,10 @@ function design(S) {
     }
     const room = S.filt(S.filt(S.noise(o.length), 'hp', 650, 0.7), 'lp', 4800, 0.7);
     S.add(o, S.mul(room, S.envExp(room.length, 0.008, 0.072, 0.018)), 0, 0.17);
-    return S.filt(S.sat(o, 1.15), 'hp', 180, 0.7);
+    // 금속의 음정은 늘리지 않고, 조금 늦게 오는 낮고 퍼지는 반사로 공간을 키운다.
+    const hall = S.filt(S.filt(S.noise(o.length), 'hp', 180, 0.7), 'lp', 2600, 0.7);
+    S.add(o, S.mul(hall, S.envExp(hall.length, 0.010, 0.11, 0.026)), 0, 0.34);
+    return S.filt(S.sat(o, 1.15), 'hp', 100, 0.7);
   }, 4);
   put('mountLock', () => {
     const o = S.buf(0.2);
@@ -884,7 +890,7 @@ export class SFX {
   titleImpact() {
     if (this._titleImpactPlayed) return;
     this._titleImpactPlayed = true;
-    this.play('titleClang', 1.08, { jitter: 0.008, verb: false });
+    this.play('titleClang', 1.18, { jitter: 0.008, verb: false });
   }
   // 장착 프레스는 터무니없이 강하고, 공개된 철권만 뒤늦게 초라한 소리를 낸다.
   equip(kind, side = 'L') {
