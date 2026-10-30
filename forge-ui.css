@@ -127,7 +127,7 @@
   transform: none;
   filter: none;
 }
-.btn:focus-visible, .wall:focus-visible, .wallPicker summary:focus-visible, #sound:focus-visible, #arcadeFace:focus-visible {
+.btn:focus-visible, .wall:focus-visible, .playWall:focus-visible, .wallPicker summary:focus-visible, #wallName:focus-visible, #sound:focus-visible, #arcadeFace:focus-visible {
   outline: 3px solid #ffad63;
   outline-offset: 4px;
 }
@@ -354,7 +354,43 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15), 0 2px 6px rgba(0, 0, 0, .22);
 }
 #endureBox .lbl { color: #f1f3f5; }
-#wallName { color: #26292d; opacity: .85; text-shadow: 0 0 5px #fff, 0 1px 2px #fff; }
+#wallName {
+  border: 1px solid #737b84;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(64, 72, 81, .97), rgba(29, 34, 40, .97));
+  color: #f1f3f5;
+  opacity: 1;
+  text-shadow: 0 2px 1px #050607;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15), 0 2px 6px rgba(0, 0, 0, .24);
+}
+#wallName::after { color: #ffad69; }
+#playWallMenu { background: rgba(7, 9, 11, .18); }
+.playWallPanel {
+  border: 2px solid #727981;
+  border-radius: 5px;
+  background:
+    linear-gradient(128deg, rgba(255, 255, 255, .045), transparent 34%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .012) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, #2b3036, #15191d);
+  box-shadow: inset 0 0 0 3px #0b0e11, inset 0 1px 0 4px rgba(255, 255, 255, .08), 0 14px 38px rgba(0, 0, 0, .5);
+}
+.playWall {
+  border: 1px solid #4e5660;
+  border-radius: 4px;
+  background: linear-gradient(130deg, #2f353c, #252a31);
+  color: #f0f2f4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  text-shadow: 0 1px 1px #080a0c;
+}
+.playWall .sw {
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2), 0 1px 3px rgba(0, 0, 0, .3);
+}
+.playWall.cur {
+  border-color: #d19562;
+  background: linear-gradient(110deg, #40362f, #292d32 75%);
+  box-shadow: inset 2px 0 0 #f9a056, inset 0 1px 0 rgba(255, 203, 155, .1);
+}
 #hint {
   border: 1px solid #717b85;
   border-radius: 6px;
@@ -370,6 +406,7 @@
 @media (hover: hover) {
   .btn:not(:disabled):hover { filter: brightness(1.08); }
   .wall:not(:disabled):hover { border-color: #b5bdc5; background: linear-gradient(130deg, #3b434c, #2b323a); }
+  .playWall:not(:disabled):hover { border-color: #b5bdc5; background: linear-gradient(130deg, #3b434c, #2b323a); }
   .wallPicker summary:hover { background: rgba(255, 255, 255, .035); }
 }
 @media (max-width: 380px) {

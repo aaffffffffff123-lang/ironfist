@@ -79,7 +79,18 @@ body.playing #sound{display:none}
 @keyframes fullPulse{50%{filter:brightness(1.25)}}
 #endureBox.flash{animation:eflash .45s ease-out}
 @keyframes eflash{0%{box-shadow:0 0 0 0 rgba(255,204,0,.9),0 1px 6px rgba(0,0,0,.15)}100%{box-shadow:0 0 0 9px rgba(255,204,0,0),0 1px 6px rgba(0,0,0,.15)}}
-#wallName{position:absolute;left:0;right:0;top:calc(18px + env(safe-area-inset-top));text-align:center;font-size:13px;font-weight:700;color:var(--ink);opacity:.6;text-shadow:0 0 6px #fff}
+#wallName{position:absolute;z-index:2;left:50%;top:calc(10px + env(safe-area-inset-top));transform:translateX(-50%);min-height:36px;max-width:calc(100vw - 360px);padding:7px 26px 7px 12px;border:0;border-radius:999px;background:rgba(255,255,255,.82);box-shadow:0 1px 6px rgba(0,0,0,.15);color:var(--ink);font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;pointer-events:auto}
+#wallName::after{content:'▾';position:absolute;right:10px;top:50%;transform:translateY(-52%);font-size:11px;color:var(--ink2)}
+#wallName[aria-expanded="true"]::after{content:'▴'}
+#playWallMenu{position:absolute;z-index:1;inset:0;display:none;pointer-events:auto;background:rgba(0,0,0,.08)}
+#playWallMenu.show{display:block}
+.playWallPanel{position:absolute;left:50%;top:calc(56px + env(safe-area-inset-top));transform:translateX(-50%);width:min(92vw,430px);padding:10px;border:1px solid rgba(0,0,0,.1);border-radius:16px;background:rgba(255,255,255,.96);box-shadow:0 8px 24px rgba(0,0,0,.2);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+#playWalls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.playWall{display:flex;align-items:center;gap:8px;min-width:0;min-height:44px;padding:7px 9px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);font-size:12px;font-weight:800;text-align:left;cursor:pointer}
+.playWall .sw{flex:0 0 28px;height:30px;border-radius:7px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.playWall span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.playWall.cur{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);background:#f4f1eb}
+.playWall:disabled{opacity:1;cursor:default}
 #hint{position:fixed;z-index:31;left:50%;bottom:calc(28px + env(safe-area-inset-bottom));transform:translate(-50%,10px);background:rgba(27,26,25,.86);color:#fff;font-size:14px;font-weight:700;padding:10px 16px;border-radius:12px;opacity:0;transition:all .3s;pointer-events:none;max-width:88vw;text-align:center}
 #hint.show{opacity:1;transform:translate(-50%,0)}
 #hint.top{z-index:60;bottom:auto;top:calc(16px + env(safe-area-inset-top))}
@@ -156,10 +167,10 @@ body.playing #sound{display:none}
 .next{flex-shrink:0;position:relative;padding:12px 20px calc(14px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:8px}
 .next .btn{width:100%;font-size:17px;padding:15px 8px}
 /* 좁은 화면: 벽 이름을 참을성 막대 아래 줄로 */
-@media (max-width:560px){#wallName{top:calc(56px + env(safe-area-inset-top))}}
+@media (max-width:560px){#wallName{top:calc(54px + env(safe-area-inset-top));max-width:80vw}.playWallPanel{top:calc(98px + env(safe-area-inset-top))}}
 @media (max-width:380px){.shopBody{padding:16px 12px}.next{padding-left:12px;padding-right:12px}.arm{padding:10px 7px}.wall .sw{display:none}#endureBox .bar{width:78px}}
 </style>
-<link rel="stylesheet" href="forge-ui.css?v=5">
+<link rel="stylesheet" href="forge-ui.css?v=6">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -189,8 +200,9 @@ body.playing #sound{display:none}
   <div id="ctrlHint"></div>
 </section>
 
-<div id="hud">
-  <div id="wallName"></div>
+<div id="hud" aria-hidden="true">
+  <button id="wallName" type="button" aria-expanded="false" aria-controls="playWallMenu" disabled></button>
+  <div id="playWallMenu" aria-hidden="true"><div class="playWallPanel" role="dialog" aria-label="벽 변경"><div id="playWalls"></div></div></div>
   <div id="endureBox" role="progressbar" aria-label="참을성" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="lbl">참을성</span><span class="bar"><i id="endureFill"></i></span></div>
 </div>
 <div id="hint"></div>
@@ -219,8 +231,8 @@ body.playing #sound{display:none}
 <div id="err"></div>
 
 <!-- ?v= : 고친 파일을 올렸을 때 예전 파일이 브라우저 캐시에서 섞여 나오지 않게 -->
-<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=7","./fx.js":"./fx.js?v=5","./sfx.js":"./sfx.js?v=15","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=10","./scrap.js":"./scrap.js?v=14","./ui.js":"./ui.js?v=14","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
-<script type="module" src="./game.js?v=30"></script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=7","./fx.js":"./fx.js?v=5","./sfx.js":"./sfx.js?v=15","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=10","./scrap.js":"./scrap.js?v=14","./ui.js":"./ui.js?v=15","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
+<script type="module" src="./game.js?v=31"></script>
 </body>
 </html>
 

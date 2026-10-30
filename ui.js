@@ -25,6 +25,7 @@ export class UI {
     this.G = G; this.WALLS = WALLS; this.A = actions; this.hadSave = hadSave;
     this.el = {
       title: $('#title'), hud: $('#hud'), endure: $('#endureBox'), fill: $('#endureFill'), wallName: $('#wallName'),
+      wallMenu: $('#playWallMenu'), playWalls: $('#playWalls'),
       hint: $('#hint'), shop: $('#shop'), sound: $('#sound'),
     };
     this._fillK = -1;
@@ -46,6 +47,17 @@ export class UI {
     $('#btnNext').addEventListener('click', () => {
       if (this.A.canStart()) this.A.start();
       else { this.deny(); this.renderShop(); }
+    });
+    this.el.wallName.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.wallName.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.el.wallMenu.classList.contains('show')) this.closePlayWalls();
+      else this.openPlayWalls();
+    });
+    this.el.wallMenu.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.wallMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.target === this.el.wallMenu) this.closePlayWalls();
     });
     this.syncSound();
     $('#ctrlHint').textContent = touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J / 마우스 좌·우 · 짧게: 타격 · 길게: 모아치기';
@@ -75,8 +87,40 @@ export class UI {
   }
   hud(on) {
     this.el.hud.classList.toggle('show', on);
+    this.el.hud.setAttribute('aria-hidden', on ? 'false' : 'true');
+    this.el.wallName.disabled = !on;
     const w = this.WALLS.find((x) => x.id === this.G.wall);
     this.el.wallName.textContent = w ? w.name : '';
+    if (!on) this.closePlayWalls();
+  }
+  openPlayWalls() {
+    this.renderPlayWalls();
+    this.el.wallMenu.classList.add('show');
+    this.el.wallMenu.setAttribute('aria-hidden', 'false');
+    this.el.wallName.setAttribute('aria-expanded', 'true');
+  }
+  closePlayWalls() {
+    this.el.wallMenu.classList.remove('show');
+    this.el.wallMenu.setAttribute('aria-hidden', 'true');
+    this.el.wallName.setAttribute('aria-expanded', 'false');
+  }
+  renderPlayWalls() {
+    const list = this.el.playWalls;
+    list.innerHTML = '';
+    for (const w of this.WALLS) {
+      if (!this.G.owned.includes(w.id)) continue;
+      const cur = this.G.wall === w.id;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'playWall' + (cur ? ' cur' : '');
+      btn.disabled = cur;
+      btn.innerHTML = `<span class="sw" style="background:${SWATCH[w.id]}"></span><span>${w.name}</span>`;
+      btn.addEventListener('click', () => {
+        if (cur) return;
+        if (this.A.selectWall(w.id)) this.closePlayWalls();
+      });
+      list.appendChild(btn);
+    }
   }
   // 참을성 막대(판 중 오른쪽 위). 피가 새는 동안처럼 자주 불려도 화면은 한 프레임에 한 번만 고침
   endure(g, bonus) {
@@ -100,7 +144,7 @@ export class UI {
   hint(id) {
     const txt = {
       controls: touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J · 짧게: 타격 · 길게: 모아치기',
-      pinned: '같은 쪽 연타',
+      pinned: '같은 쪽을 한 번 터치',
     }[id];
     if (!txt) return;
     this.say(txt);

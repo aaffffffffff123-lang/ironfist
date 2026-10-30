@@ -719,7 +719,7 @@ function scrapBreakFx(a, res, contact) {
   round.scrapParts += n;
 }
 
-// 마지막 가시벽에 꿰인 팔을 눌러 뜯어내기
+// 마지막 가시벽에 꿰인 팔을 한 번 눌러 뜯어내기
 function onTug(fist, now) {
   const a = fist.arm;
   fist.tug = 1;
@@ -735,8 +735,8 @@ function onTug(fist, now) {
   camTug(a.side);
   vibrate(14);
   if (fist.state === 'pinned') {
-    fist.pinT -= 0.45;
-    if (fist.pinT <= 0) release(fist, now, false);
+    fist.pinT = 0;
+    release(fist, now, false);
   }
   checkRoundEnd();
 }
@@ -1290,7 +1290,24 @@ const actions = {
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
     location.reload();
   },
-  selectWall(id) { if (G.owned.includes(id)) { setWall(id); save(); sfx.play('click', 0.5); } },
+  selectWall(id) {
+    if (!G.owned.includes(id) || G.wall === id) return false;
+    // 판 중 교체는 손상·참을성·판 기록은 보존하고, 진행 중인 팔 동작만 가드로 회수한다.
+    // 박힌 팔 상태에서 벽 오브젝트만 바뀌면 다음 입력이 예전 벽의 상태를 물고 갈 수 있다.
+    if (mode === 'play') {
+      if (!round || round.ended) return false;
+      cancelAllInputs();
+      chain = [];
+      hitstop = 0; rush = 0;
+      cam.charge = 0; cam.chargeSide = 0;
+      skillFx?.clear();
+      for (const side of ['L', 'R']) resetArmMotion(side);
+    }
+    setWall(id);
+    save();
+    sfx.play('click', 0.5);
+    return true;
+  },
   // 철권은 공짜 — 박살나면 또 장착함
   scrap(side) {
     const a = arms[side];
