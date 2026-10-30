@@ -204,6 +204,37 @@ function design(S) {
     S.add(o, ring, 0.14, 0.12);
     return S.filt(S.sat(o, 1.15), 'hp', 240, 0.7);
   }, 4);
+  // 입장음: 접촉음이 주역인 짧은 모루 타격. 장착음과 분리해 다른 연출은 유지한다.
+  put('titleClang', () => {
+    const o = S.buf(0.62);
+    const contact = S.filt(S.filt(S.noise(Math.floor(0.075 * S.sr)), 'hp', 720, 0.7), 'lp', 8500, 0.7);
+    S.mul(contact, S.envExp(contact.length, 0.00008, 0.011));
+    S.add(o, contact, 0, 1.6);
+    const weight = S.filt(S.noise(Math.floor(0.055 * S.sr)), 'bp', 530, 0.65);
+    S.add(o, S.mul(weight, S.envExp(weight.length, 0.0001, 0.009)), 0, 0.7);
+
+    // 한 음이 길게 남지 않도록 고유진동을 여러 대역으로 흩뜨리고 빠르게 감쇠시킨다.
+    const detune = rnd(0.985, 1.015);
+    const modes = [
+      [730, 0.09, 0.028], [1090, 0.10, 0.043], [1480, 0.13, 0.065],
+      [1835, 0.14, 0.085], [2110, 0.12, 0.070], [2470, 0.14, 0.080],
+      [2835, 0.10, 0.060], [3260, 0.12, 0.055], [3695, 0.09, 0.047],
+      [4210, 0.08, 0.040], [4780, 0.07, 0.033], [5360, 0.05, 0.027],
+      [6130, 0.04, 0.021], [7240, 0.025, 0.016],
+    ].map(([f, a, tau]) => [f * detune * rnd(0.995, 1.005), a, tau]);
+    S.add(o, S.modal(0.45, modes, 0.0001), 0.0002, 1.0);
+    const grit = S.filt(S.noise(Math.floor(0.15 * S.sr)), 'bp', 2900, 0.8);
+    S.add(o, S.mul(grit, S.envExp(grit.length, 0.0002, 0.024)), 0.001, 0.65);
+
+    // 음정을 반복하는 에코 대신 접촉음의 짧고 불규칙한 반사로 공간감을 준다.
+    const reflection = S.filt(contact, 'lp', 4200, 0.7);
+    for (const [at, gain] of [[0.027, 0.19], [0.043, -0.13], [0.068, 0.11], [0.097, -0.08], [0.139, 0.055]]) {
+      S.add(o, reflection, at, gain);
+    }
+    const room = S.filt(S.filt(S.noise(o.length), 'hp', 650, 0.7), 'lp', 4800, 0.7);
+    S.add(o, S.mul(room, S.envExp(room.length, 0.008, 0.072, 0.018)), 0, 0.17);
+    return S.filt(S.sat(o, 1.15), 'hp', 180, 0.7);
+  }, 4);
   put('mountLock', () => {
     const o = S.buf(0.2);
     const snap = S.filt(S.noise(Math.floor(0.01 * S.sr)), 'hp', 2200, 0.65);
@@ -853,7 +884,7 @@ export class SFX {
   titleImpact() {
     if (this._titleImpactPlayed) return;
     this._titleImpactPlayed = true;
-    this.play('forgeHit', 1.08, { jitter: 0.012, verbAmt: 0.55 });
+    this.play('titleClang', 1.08, { jitter: 0.008, verb: false });
   }
   // 장착 프레스는 터무니없이 강하고, 공개된 철권만 뒤늦게 초라한 소리를 낸다.
   equip(kind, side = 'L') {
@@ -960,3 +991,4 @@ export class SFX {
     }
   }
 }
+
