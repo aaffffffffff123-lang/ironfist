@@ -695,7 +695,7 @@ class NailWall extends WallBase {
   }
   impact(fist, arm, c) {
     const who = hitter(arm);
-    if (who === 'scrap') return { stick: 'stuck', releaseAfter: 0.24, dmgMul: 1.1 };
+    if (who === 'scrap') return { dmgMul: 1.1 };
     if (who === 'pipe') return { dmgMul: 1 };
     if (who === 'stump') { stumpWound(arm, 4, 1, 0.03); return { stick: 'stuck', releaseAfter: 0.24, dmgMul: 1.1 }; }
     return { stick: 'stuck', releaseAfter: 0.24, dmgMul: 1.1 };
@@ -727,7 +727,7 @@ class FreezerWall extends WallBase {
   }
   impact(fist, arm, c) {
     const who = hitter(arm);
-    if (who === 'scrap' || who === 'pipe') return { stick: 'stuck', releaseAfter: 0.30 };
+    if (who === 'scrap' || who === 'pipe') return {};
     return { stick: 'stuck', releaseAfter: 0.30 };
   }
   tug(fist, arm) { this.ctx.fx.frostPuff(arm, 6); }
@@ -939,7 +939,7 @@ class SpikeWall extends WallBase {
   }
   impact(fist, arm, c) {
     const who = hitter(arm);
-    if (who === 'scrap' || who === 'pipe') { this.ctx.fx.sparks(c, 14, 0xffd28a); return { stick: 'pinned', pin: 1.4, dmgMul: 1.1 }; }
+    if (who === 'scrap' || who === 'pipe') { this.ctx.fx.sparks(c, 14, 0xffd28a); return { dmgMul: 1.1 }; }
     if (who === 'stump') { stumpWound(arm, 3, 1, 0.03); stumpWound(arm, 4, 1, 0.03); }
     // 꿰인 자리: 입구는 너클, 출구는 팔뚝 등쪽
     if (arm.I < 0.5) {

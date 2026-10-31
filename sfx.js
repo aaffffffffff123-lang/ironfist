@@ -5,6 +5,18 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const TAU = Math.PI * 2;
 export const WHOOSH_PEAK = 0.09;   // 휘두르는 바람이 가장 커지는 시점(초) — 이 순간이 벽에 닿는 순간과 맞게 재생
 
+// 같은 금속도 덩어리·얇은 판·가는 봉의 울림과 부품이 흔들리는 박자가 다르다.
+// [전용 버퍼, 몸통 저음 비율, 잔향 비율]
+const SCRAP_SOUND = Object.freeze({
+  base:     ['hitScrapBase', 1.12, 0.34],
+  wire:     ['hitScrapWire', 0.64, 0.12],
+  hand:     ['hitScrapHand', 0.92, 0.26],
+  umbrella: ['hitScrapUmbrella', 0.68, 0.16],
+  canchain: ['hitScrapCan', 0.76, 0.12],
+  cutlery:  ['hitScrapCutlery', 0.70, 0.18],
+});
+const scrapSound = (kind) => SCRAP_SOUND[kind] || SCRAP_SOUND.base;
+
 // ------------------------------------------------------------------ DSP
 class Synth {
   constructor(sr) { this.sr = sr; }
@@ -500,6 +512,73 @@ function design(S) {
     const c = S.filt(S.noise(150), 'hp', 3000, 0.7); S.add(out, c, 0, 0.8);
     return out;
   }, 2);
+
+  // 철권 재질별 접촉음. 미리 합성한 짧은 버퍼를 재사용해 연타 때 합성 비용을 추가하지 않는다.
+  const metalTap = (o, at, f, weight, tau = 0.022) => {
+    const n = S.filt(S.noise(Math.ceil(0.012 * S.sr)), 'hp', 2300, 0.7);
+    S.add(o, S.mul(n, S.envExp(n.length, 0.00015, 0.0018)), at, weight * 0.45);
+    S.add(o, S.modal(tau * 6, [[f, 0.8, tau], [f * 2.73, 0.35, tau * 0.54], [f * 4.61, 0.12, tau * 0.28]]), at, weight);
+  };
+  put('hitScrapBase', () => {
+    const o = S.buf(0.48), f = rnd(300, 345);
+    S.add(o, S.sweep(0.14, 185, 90, 0.014, 0.027), 0, 0.45);
+    S.add(o, S.modal(0.44, [[f, 0.70, 0.085], [f * 2.67, 0.52, 0.063], [f * 5.13, 0.38, 0.043], [f * 8.41, 0.20, 0.023]]), 0, 0.9);
+    metalTap(o, 0, rnd(1400, 1750), 0.75, 0.016);
+    for (let j = 0; j < 3; j++) metalTap(o, 0.033 + j * 0.036 + rnd(0, 0.009), rnd(1100, 2900), 0.18 / (j + 1), 0.012);
+    return S.sat(o, 1.3);
+  }, 4);
+  put('hitScrapCan', () => {
+    const o = S.buf(0.42), f = rnd(410, 465);
+    // 속 빈 얇은 통: 낮은 퐁 + 찌그러지며 음정이 휘는 판 + 뒤쪽 통의 덜컥거림.
+    S.add(o, S.sweep(0.18, f * 1.17, f * 0.77, 0.013, 0.038), 0, 0.75);
+    S.add(o, S.modal(0.26, [[f * 1.84, 0.65, 0.043], [f * 3.13, 0.52, 0.032], [f * 5.47, 0.27, 0.019]]), 0, 0.6);
+    S.add(o, S.grains(0.17, 46, 1600, 6300, 0.0004, 0.0023, (r) => r * r * 0.14, 2), 0.001, 1.05);
+    for (let j = 0; j < 3; j++) {
+      const at = 0.040 + j * 0.042 + rnd(0, 0.008);
+      S.add(o, S.sweep(0.12, f * rnd(0.8, 1.3), f * 0.7, 0.009, 0.019), at, 0.28 / (j + 1));
+      metalTap(o, at, rnd(1250, 2000), 0.14 / (j + 1), 0.009);
+    }
+    return S.sat(o, 1.5);
+  }, 4);
+  put('hitScrapCutlery', () => {
+    const o = S.buf(0.46), f = rnd(2100, 2310);
+    // 숟가락의 맑은 챙, 포크·젓가락이 조금 늦게 맞부딪히는 짧은 차라락.
+    metalTap(o, 0, f, 0.85, 0.065);
+    metalTap(o, 0.008, f * 1.32, 0.42, 0.038);
+    for (let j = 0; j < 5; j++) metalTap(o, 0.026 + j * 0.019 + rnd(0, 0.006), rnd(2500, 3900), 0.28 * Math.exp(-j * 0.35), 0.024);
+    return o;
+  }, 4);
+  put('hitScrapWire', () => {
+    const o = S.buf(0.38), f = rnd(800, 900);
+    // 엉킨 가는 철사: 짧은 긁힘 뒤 빠르게 감쇠하는 탄성 떨림. 묵직한 쇳덩이 울림은 없다.
+    const scrape = S.filt(S.noise(Math.ceil(0.13 * S.sr)), 'bp', 3200, 0.85);
+    S.add(o, S.mul(scrape, S.envExp(scrape.length, 0.0004, 0.016)), 0, 0.55);
+    for (let j = 0; j < 6; j++) {
+      const r = f * (1 + j * 0.29), ring = S.sweep(0.32, r * 1.07, r, 0.024, 0.043 + j * 0.003);
+      for (let i = 0; i < ring.length; i++) ring[i] *= 0.7 + 0.3 * Math.cos(TAU * (39 + j * 11) * i / S.sr);
+      S.add(o, ring, j * 0.002, 0.34 / (1 + j * 0.5));
+    }
+    S.add(o, S.grains(0.10, 24, 2800, 7000, 0.0003, 0.0013, (r) => r * r * 0.08), 0, 0.65);
+    return o;
+  }, 4);
+  put('hitScrapUmbrella', () => {
+    const o = S.buf(0.44), f = rnd(1200, 1320);
+    // 우산살은 길고 가는 봉 여러 개가 함께 떨며, 헐거운 관절이 뒤늦게 달그락거린다.
+    metalTap(o, 0, rnd(670, 760), 0.55, 0.020);
+    for (let j = 0; j < 7; j++) {
+      S.add(o, S.modal(0.36, [[f * (1 + j * 0.18), 0.45, 0.050 + j * 0.003], [f * (2.8 + j * 0.21), 0.14, 0.027]]), j * 0.003, 0.55 / (1 + j * 0.2));
+    }
+    for (let j = 0; j < 6; j++) metalTap(o, 0.035 + j * 0.025 + rnd(0, 0.008), rnd(1900, 3100), 0.22 * Math.exp(-j * 0.28), 0.010);
+    return o;
+  }, 4);
+  put('hitScrapHand', () => {
+    const o = S.buf(0.48), f = rnd(630, 690);
+    // 굵은 철근 가짜손: 속 빈 통 소리 없이 단단한 깡, 손가락 봉의 짧은 겹울림.
+    metalTap(o, 0, rnd(1700, 1850), 0.85, 0.025);
+    S.add(o, S.modal(0.44, [[f, 0.8, 0.092], [f * 2.76, 0.5, 0.062], [f * 5.4, 0.22, 0.036]]), 0, 0.85);
+    for (let j = 0; j < 4; j++) metalTap(o, 0.006 + j * 0.007, f * (1.8 + j * 0.31), 0.2, 0.034);
+    return S.sat(o, 1.25);
+  }, 4);
   put('scrapOn', () => {
     const out = S.buf(0.9);
     for (let k = 0; k < 6; k++) S.add(out, B.clank[Math.floor(Math.random() * B.clank.length)], k * rnd(0.05, 0.12), rnd(0.15, 0.4));
@@ -926,7 +1005,7 @@ export class SFX {
   }
   // 모아치기 전용 추가 층. 기존 impact()의 벽·살 소리는 그대로 두고,
   // 접촉의 질량과 늦게 밀려오는 방 울림만 더한다.
-  powerImpact(side = 'L', scrap = false, strength = 1) {
+  powerImpact(side = 'L', scrap = false, strength = 1, kind = 'base') {
     if (!this.ready || !this.ctx) return;
     const q = Math.max(0, Math.min(1, Number.isFinite(strength) ? strength : 1));
     const now = this.ctx.currentTime;
@@ -951,25 +1030,26 @@ export class SFX {
       delay: 0.042, pan: pan * 0.25, rate: 0.96, jitter: 0.025, verbAmt: 0.42,
     });
     if (scrap) {
-      this.play('powerMetal', 0.48 * k, {
-        delay: 0.007, pan: pan * 1.65, rate: 0.94, jitter: 0.045, verbAmt: 0.38,
+      const [sound, , verbAmt] = scrapSound(kind);
+      this.play(sound, 0.54 * k, {
+        delay: 0.007, pan: pan * 1.65, rate: 0.92, jitter: 0.045, verbAmt,
       });
     }
   }
   // 타격 묶음 — side: 친 팔('L'|'R'), feel: 타격 세기(연출용, 0.6~1.9)
-  impact(wallId, res, power, arm, side = 'L', feel = 1) {
+  impact(wallId, res, power, arm, side = 'L', feel = 1, kind = arm.scrapObj?.kind || 'base') {
     const v = Math.min(1, 0.62 + power * 0.28);
     const k = Math.min(1.25, 0.85 + (feel - 0.8) * 0.4);
     const pan = side === 'L' ? -0.2 : 0.2;
     const scrap = res.scrap > 0;
     const mat = MAT[wallId], thud = THUD[wallId];
     // 벽은 멀쩡하고 손만 망가지는 대신, 모든 접촉에 짧고 낮은 '쿵'을 또렷하게 남긴다.
-    const boom = scrap ? 1.12 : arm.I >= 0.5 ? 1.0 : 0.96;
-    this.play('heft', boom * k, { pan, rate: scrap ? 0.9 : 0.94, jitter: 0.04, verbAmt: 0.76 });
+    const [sound, body, verbAmt] = scrapSound(kind);
+    const boom = scrap ? body : arm.I >= 0.5 ? 1.0 : 0.96;
+    this.play('heft', boom * k, { pan, rate: scrap ? 0.9 : 0.94, jitter: 0.04, verbAmt: scrap ? 0.42 : 0.76 });
     if (scrap) {
-      // 쇳덩이가 벽을 때림: 쨍 + 묵직한 쿵
-      this.play('clank', Math.max(0.85, v), { pan }); if (Math.random() < 0.5) this.play('ping', 0.4, { delay: rnd(0.04, 0.12), pan: pan * 2 });
-      if (thud) this.play(thud, 0.5, { pan });
+      this.play(sound, Math.max(0.92, v) * k, { pan, jitter: 0.055, verbAmt });
+      if (thud) this.play(thud, 0.30, { pan, verbAmt: 0.35 });
     } else if (arm.I >= 0.5) {
       // 손 없는 팔뚝 끝이 짓이겨짐
       this.play('stump', 1.0, { pan });
@@ -989,11 +1069,11 @@ export class SFX {
       case 'gravel': if (!scrap) this.play('crunch', 0.3); break;
       case 'traps': this.play('snap', 0.9, { delay: 0.004 }); if (Math.random() < 0.6) this.play('snap', 0.6, { delay: rnd(0.02, 0.06) }); break;
       case 'glass': this.play('glass', 0.85, { delay: 0.003 }); break;
-      case 'nails': if (scrap) this.play('ping', 0.7, { delay: 0.006, rate: 1.25 }); else this.play('impale', 0.9, { delay: 0.005 }); break;
+      case 'nails': if (scrap) this.play('ping', 0.22, { delay: 0.006, rate: 1.25, pan, verbAmt: 0.18 }); else this.play('impale', 0.9, { delay: 0.005 }); break;
       case 'freezer': this.play('frost', 0.7, { delay: 0.005 }); break;
       case 'hotplate': this.play('sizzle', scrap ? 0.45 : 0.95, { delay: 0.01, jitter: 0.06 }); break;
       case 'electric': this.play('zap', 1.0); break;
-      case 'spikes': if (scrap) { this.play('ping', 0.8, { rate: 0.8 }); this.play('clank', 0.6, { delay: 0.02, rate: 0.85 }); } else this.play('spike', 1.0); break;
+      case 'spikes': if (scrap) this.play('ping', 0.28, { rate: 0.8, pan, verbAmt: 0.18 }); else this.play('spike', 1.0); break;
     }
   }
 }

@@ -596,6 +596,8 @@ function onImpact(fist, now) {
   const react = wall.impact(fist, a, P.contact) || {};
   // 피해량(벽마다 pace로 판 길이를 맞춤)
   const striker = hitter(a);
+  // 부서지는 바로 그 타격도 접촉 당시 재질로 울린다. 남은 팔뚝도 원래 장착물 재질을 따른다.
+  const scrapKind = a.scrapObj?.kind || 'base';
   const base = W.dmg * DAMAGE_PACE * W.pace * rnd(0.8, 1.2) * (react.dmgMul || 1);
   let left = base;
   if (a.scrap && (a.scrap.lumpHP > 0 || a.scrap.pipeHP > 0)) {
@@ -630,13 +632,13 @@ function onImpact(fist, now) {
   const feel = clamp(0.8 + tier * 0.25 + evW, 0.6, 1.9);
   fx.impact(a, P.contact, power, res, W, react);
   fx.impactDust(P.contact, W.id, feel, striker);
-  sfx.impact(W.id, res, power, a, a.side, feel);
+  sfx.impact(W.id, res, power, a, a.side, feel, scrapKind);
   if (powerFxK >= 0.04) {
     const scrap = striker === 'scrap' || striker === 'pipe';
     // 기본 기술(충격파)은 원래 연출, 나머지는 벽마다의 기술 연출
     if (!skillFx || skill.id === 'shock') fx.powerImpact?.(P.contact, { strength: powerFxK, scrap, side: a.side, full });
     else skillFx.impact(a.side, P.contact, powerFxK, { scrap, full, arm: a, fist });
-    sfx.powerImpact?.(a.side, scrap, powerFxK);
+    sfx.powerImpact?.(a.side, scrap, powerFxK, scrapKind);
   }
   // 잔상 연타: 모은 첫 대가 꽂히면 여러 대가 이어서 들어감
   if (skill.id === 'barrage' && !fist.autoPunch && chargeK >= 0.35 && !react.stick && a.canPunch()) { fist.rushing = true; fist.barrage = 4 + Math.round(5 * chargeK); }
