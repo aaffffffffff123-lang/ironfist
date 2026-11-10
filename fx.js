@@ -354,6 +354,82 @@ class Puffs {
   }
 }
 
+// ------------------------------------------------------------------ 달군 철판에 눌어붙은 살: 익다가 타 들어감
+// 붙자마자 치익 하고 김이 확 오르고, 몇 초면 겉이 허옇게 익고, 스무 초 남짓 노릇노릇,
+// 반 분이 넘으면 까맣게 타며 연기가 짙어짐. 기름이 튀며 타닥거리고 다 탄 뒤엔 조용해짐
+const COOK = { done: 6, brown: 20, char: 44, ash: 72 };   // 붙은 뒤 초
+function cookK(c) {
+  if (c <= COOK.done) return 0.22 * (c / COOK.done);
+  if (c <= COOK.brown) return 0.22 + 0.28 * (c - COOK.done) / (COOK.brown - COOK.done);
+  if (c <= COOK.char) return 0.5 + 0.36 * (c - COOK.brown) / (COOK.char - COOK.brown);
+  return Math.min(1, 0.86 + 0.14 * (c - COOK.char) / (COOK.ash - COOK.char));
+}
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const SRGB = (r, g, b) => new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace);
+// 날것 → 익음 → 노릇(갈색) — 종류마다(탄 색은 다 같음)
+const GRILL_COL = {
+  meat: [SRGB(0.48, 0.07, 0.05), SRGB(0.62, 0.47, 0.42), SRGB(0.38, 0.17, 0.07)],
+  fat: [SRGB(0.86, 0.70, 0.50), SRGB(0.93, 0.85, 0.68), SRGB(0.68, 0.40, 0.13)],
+  skin: [SRGB(0.88, 0.67, 0.56), SRGB(0.84, 0.66, 0.55), SRGB(0.55, 0.29, 0.12)],
+  bone: [SRGB(0.92, 0.88, 0.79), SRGB(0.90, 0.85, 0.74), SRGB(0.64, 0.47, 0.30)],
+  nail: [SRGB(0.94, 0.85, 0.80), SRGB(0.90, 0.80, 0.70), SRGB(0.56, 0.38, 0.22)],
+};
+GRILL_COL.patch = GRILL_COL.skin; GRILL_COL.meatpatch = GRILL_COL.meat;
+function grillMaterial(kind) {
+  const [raw, done, brown] = GRILL_COL[kind] || GRILL_COL.meat;
+  const U = { uCook: { value: 0 }, uRaw: { value: raw }, uDone: { value: done }, uBrown: { value: brown }, uSeed: { value: Math.random() * 10 }, uFl: { value: 1 } };
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0 });
+  m.userData.U = U;
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGL;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvGL = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec3 vGL; uniform float uCook; uniform vec3 uRaw; uniform vec3 uDone; uniform vec3 uBrown; uniform float uSeed; uniform float uFl;
+      float gh(vec3 p){ p = fract(p*0.3183099 + vec3(0.11,0.17,0.13)); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+      float gn(vec3 x){ vec3 i=floor(x); vec3 f=fract(x); f=f*f*(3.0-2.0*f);
+        return mix(mix(mix(gh(i),gh(i+vec3(1,0,0)),f.x), mix(gh(i+vec3(0,1,0)),gh(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(gh(i+vec3(0,0,1)),gh(i+vec3(1,0,1)),f.x), mix(gh(i+vec3(0,1,1)),gh(i+vec3(1,1,1)),f.x),f.y), f.z); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // 얇은 가장자리부터 먼저 익고 타며, 군데군데 얼룩지게
+        float nz = gn(vGL * 2.7 + uSeed) * 0.6 + gn(vGL * 7.3 + uSeed * 2.0) * 0.4;
+        float gc = uCook + (nz - 0.5) * 0.24 + clamp(length(vGL.xy) - 0.55, 0.0, 0.5) * 0.25;
+        vec3 chr = vec3(0.032, 0.024, 0.02);
+        vec3 gcol = mix(uRaw, uDone, smoothstep(0.0, 0.22, gc));
+        gcol = mix(gcol, uBrown, smoothstep(0.2, 0.52, gc));
+        gcol = mix(gcol, chr, smoothstep(0.5, 0.88, gc));
+        // 다 탄 겉은 쩍쩍 갈라짐
+        float crk = smoothstep(0.62, 0.92, gc) * (1.0 - smoothstep(0.0, 0.07, abs(gn(vGL * 8.5 + uSeed) - 0.5)));
+        gcol = mix(gcol, chr * 0.4, crk * 0.7);
+        diffuseColor.rgb = gcol;`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(0.18, 0.6, smoothstep(0.0, 0.24, gc));
+        roughnessFactor = mix(roughnessFactor, 0.34, smoothstep(0.24, 0.5, gc) * (1.0 - smoothstep(0.5, 0.78, gc)));
+        roughnessFactor = mix(roughnessFactor, 0.96, smoothstep(0.55, 0.86, gc));`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        // 타는 동안 갈라진 틈이 철판 열에 빨갛게 비침(다 타면 사그라듦)
+        totalEmissiveRadiance += vec3(1.0, 0.26, 0.035) * crk * 1.4 * uFl * (1.0 - smoothstep(0.93, 1.0, uCook));`);
+  };
+  m.customProgramCacheKey = () => 'cg-grill-1';
+  return m;
+}
+// 철판에 눌어붙은 얇은 살갗·살 조각(바닥은 납작, 가운데가 살짝 솟음, 테두리는 들쭉날쭉)
+function patchGeometry() {
+  const N = 18, pos = [0, 0, 0.32], idx = [];
+  const R = (k) => { const x = Math.sin(k * 51.7 + 3.3) * 43758.5453; return x - Math.floor(x); };
+  for (const [ring, rk, h] of [[1, 0.55, 0.22], [2, 1.0, 0.04]]) {
+    for (let j = 0; j < N; j++) {
+      const a = (j / N) * Math.PI * 2, r = rk * (0.78 + R(j * 3 + ring) * 0.38);
+      pos.push(Math.cos(a) * r, Math.sin(a) * r * 0.82, h + (R(j + 40 * ring) - 0.5) * 0.08);
+    }
+  }
+  for (let j = 0; j < N; j++) idx.push(0, 1 + j, 1 + (j + 1) % N);
+  for (let j = 0; j < N; j++) { const a = 1 + j, b = 1 + (j + 1) % N, c = 1 + N + j, d = 1 + N + (j + 1) % N; idx.push(a, c, b, b, c, d); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
 // ------------------------------------------------------------------ 전기 아크
 class Arcs {
   constructor() {
@@ -579,7 +655,21 @@ export class FX {
     this.ambient = [];
     this.wall = null;
     this.armRefs = null;
+    // 달군 철판: 눌어붙은 살 조각마다 익는 시간, 김·연기·기름 튐(벽이 바뀌어도 장면에 그대로 두고 철판에서만 냄)
+    this.patchGeo = patchGeometry();
+    this.grill = {
+      list: [], flash: 0, searT: -9, popT: 0, popBudget: 0,
+      // 철판 한가운데가 하얗게 달아올라 있어 김은 살짝 잿빛, 타는 연기는 짙은 회갈색이어야 보임
+      steam: new Puffs(260, { color: 0xd9d3cc, size: 0.012, opacity: 0.36 }),
+      smoke: new Puffs(240, { color: 0x5f5650, size: 0.02, opacity: 0.34 }),
+      spat: new Puffs(140, { color: 0xfff0c4, size: 0.002, opacity: 0.95 }),
+    };
+    for (const P of [this.grill.steam, this.grill.smoke, this.grill.spat]) { P.obj.renderOrder = 4; scene.add(P.obj); }
+    this.sfx = null;   // 게임이 넣어 줌(지글거림)
   }
+  isHot() { return !!(this.wall && this.wall.def.id === 'hotplate'); }
+  // 처음 나올 때 멈칫하지 않게 미리 컴파일할 재질
+  warmMats() { return [grillMaterial('meat')]; }
   // 벽에 꽂힌 고철 부품은 개수 제한(오래된 것부터 치움) — 계속 쌓이면 무거워짐
   capStuck(list, obj, max) {
     list.push(obj);
@@ -599,7 +689,7 @@ export class FX {
   }
   // 벽마다 한 번 만들어 저장(다음에 와도 같은 자리)
   oldMarks(id) {
-    if (id === 'cement') return [];
+    if (id === 'cement' || id === 'paper') return [];
     this.G.old = this.G.old || {};
     if (!Array.isArray(this.G.old[id])) this.G.old[id] = makeOldMarks(id);
     return this.G.old[id];
@@ -607,7 +697,7 @@ export class FX {
   placeOldBits(wall) {
     this.oldGroup.clear();
     const id = wall.def.id, D = wall.D;
-    if (id === 'cement') return;
+    if (id === 'cement' || id === 'paper') return;
     const near = (list, r, n) => list.map((s) => [Math.min(Math.hypot(s.x + 0.05, s.y + 0.05), Math.hypot(s.x - 0.05, s.y + 0.05)), s])
       .filter((a) => a[0] < r).sort(() => Math.random() - 0.5).slice(0, n).map((a) => a[1]);
     const bit = (x, y, z, s, mat, flat = 0.55) => {
@@ -670,6 +760,13 @@ export class FX {
     }
     // 벽 성격별
     if (W.id === 'hotplate') this.smokeBurst(c, 1 + power * 0.5);
+    // 달군 철판: 맞은 자리 살갗·짓이겨진 살이 철판에 눌어붙음(석쇠에 고기 들러붙듯) — 붙은 데서 익다가 탐
+    if (W.id === 'hotplate' && !scrapHit) {
+      const fresh = arm.I < 0.3;
+      if (Math.random() < (fresh ? 0.3 + arm.I * 1.8 : 0.8)) {
+        this.stickChunk(new THREE.Vector3(cx + rnd(-0.014, 0.014), cy + rnd(-0.01, 0.008), wallZ + 0.0008), rnd(0.0045, 0.009) * (fresh ? 1 : 1.3), fresh ? 'patch' : 'meatpatch', [0, 0, +rnd(0, 6.28).toFixed(2)]);
+      }
+    }
     if (W.id === 'gravel' && arm.I < 0.5) for (let i = 0; i < 3; i++) this.chunk(c, wallZ, 'skin', rnd(0.0015, 0.003));
   }
 
@@ -796,29 +893,106 @@ export class FX {
     m.position.set(c.x + rnd(-0.01, 0.01), c.y + rnd(-0.01, 0.01), wallZ + 0.01);
     m.castShadow = true;
     this.scene.add(m);
-    const stick = Math.random() < (kind === 'bone' ? 0.25 : 0.55);
+    // 달군 철판엔 닿는 족족 눌어붙음
+    const hot = this.isHot();
+    const stick = Math.random() < (kind === 'bone' ? (hot ? 0.5 : 0.25) : (hot ? 0.85 : 0.55));
     this.flying.push({ m, v: new THREE.Vector3(rnd(-1.2, 1.2), rnd(-0.4, 1.6), stick ? rnd(-0.6, -0.1) : rnd(0.2, 0.9)), w: new THREE.Vector3(rnd(-20, 20), rnd(-20, 20), rnd(-20, 20)), t: 0, kind, stick, size });
   }
 
-  // 벽에 붙어 남는 살점(저장)
+  // 벽에 붙어 남는 살점(저장). 달군 철판이면 붙은 순간부터 익는 시간(c)을 셈
   stickChunk(p, size, kind = 'meat', rot = null) {
     const rec = { k: kind, p: [+p.x.toFixed(4), +p.y.toFixed(4), +p.z.toFixed(4)], s: +size.toFixed(4), r: rot || [rnd(0, 6), rnd(0, 6), rnd(0, 6)].map((v) => +v.toFixed(2)) };
+    if (this.isHot()) rec.c = 0;
     this.addStuckMesh(rec);
     this.stuckList.push(rec);
-    if (this.stuckList.length > 140) { this.stuckList.shift(); const o = this.stuckGroup.children[0]; if (o) this.stuckGroup.remove(o); }
+    if (this.stuckList.length > 140) { this.stuckList.shift(); const o = this.stuckGroup.children[0]; if (o) { this.stuckGroup.remove(o); this._unGrill(o); } }
+    if (rec.c === 0) this._sear(p, size);
   }
   addStuckMesh(rec) {
-    const mat = { meat: this.meatMat, fat: this.fatMat, bone: this.boneMat, skin: this.skinBitMat, nail: this.nailMat }[rec.k] || this.meatMat;
-    const geo = rec.k === 'bone' ? this.boneGeo : (rec.k === 'skin' || rec.k === 'nail') ? this.nailGeo : this.meatGeos[Math.abs(Math.floor(rec.p[0] * 1000)) % 3];
+    const hot = this.isHot();
+    const flat = rec.k === 'patch' || rec.k === 'meatpatch';
+    const mat = hot ? grillMaterial(rec.k) : ({ meat: this.meatMat, fat: this.fatMat, bone: this.boneMat, skin: this.skinBitMat, nail: this.nailMat, patch: this.skinBitMat, meatpatch: this.meatMat }[rec.k] || this.meatMat);
+    const geo = flat ? this.patchGeo : rec.k === 'bone' ? this.boneGeo : (rec.k === 'skin' || rec.k === 'nail') ? this.nailGeo : this.meatGeos[Math.abs(Math.floor(rec.p[0] * 1000)) % 3];
     const m = new THREE.Mesh(geo, mat);
     m.position.fromArray(rec.p); m.rotation.set(rec.r[0], rec.r[1], rec.r[2]);
-    m.scale.set(rec.s * 1.2, rec.s, rec.s * 0.55);
+    if (flat) m.scale.set(rec.s * 1.25, rec.s, rec.s);
+    else m.scale.set(rec.s * 1.2, rec.s, rec.s * 0.55);
     m.castShadow = true;
     this.stuckGroup.add(m);
+    if (hot) {
+      if (!(rec.c >= 0)) rec.c = COOK.ash + 8;   // 예전에 붙어 있던 건 다 타 버린 채로
+      this.grill.list.push({ m, rec, U: mat.userData.U, s0: m.scale.clone(), acc: [Math.random(), Math.random(), Math.random()], sz: clamp(rec.s / 0.006, 0.5, 2.2), bone: rec.k === 'bone' });
+    }
+  }
+  _unGrill(o) {
+    const L = this.grill.list, i = L.findIndex((g) => g.m === o);
+    if (i >= 0) { L[i].m.material.dispose(); L.splice(i, 1); }
   }
   loadStuck(list) {
+    for (const g of this.grill.list) g.m.material.dispose();
+    this.grill.list = []; this.grill.flash = 0;
     this.stuckGroup.clear(); this.stuckList = (list || []).slice();
+    // 철판에 다시 와 보면 두고 간 살은 이미 새까맣게 타 있음
+    if (this.isHot()) for (const r of this.stuckList) r.c = Math.max(Number.isFinite(r.c) ? r.c : 0, COOK.ash + 8);
     for (const r of this.stuckList) this.addStuckMesh(r);
+  }
+  // 갓 눌어붙은 순간: 치익 — 김이 확 오름
+  _sear(p, size) {
+    const G = this.grill;
+    for (let i = 0; i < 9; i++) G.steam.emit({ x: p.x + rnd(-0.004, 0.004), y: p.y + rnd(-0.003, 0.004), z: p.z + 0.004, vx: rnd(-0.05, 0.05), vy: rnd(0.08, 0.22), vz: rnd(0.01, 0.07), g: 0.08, drag: 0.6, life: rnd(0.6, 1.2), size: rnd(0.007, 0.014), grow: 3.0, a: rnd(0.3, 0.48) });
+    G.flash = Math.min(2.2, G.flash + 0.4 + size * 40);
+    const now = performance.now() * 0.001;
+    if (this.sfx && now - G.searT > 0.07) { G.searT = now; this.sfx.play('sear', Math.min(0.92, 0.42 + size * 55), { pan: clamp(p.x * 3, -0.6, 0.6), jitter: 0.14, verbAmt: 0.26 }); }
+  }
+  // 매 프레임: 익는 정도·오그라듦·김·연기·기름 튐·지글거림
+  updateGrill(dt, time) {
+    const G = this.grill, L = G.list;
+    G.flash *= Math.exp(-dt / 0.3);
+    let level = G.flash;
+    if (!this.isHot()) { this.sfx?.grill?.(0); return; }
+    // 김·연기가 한꺼번에 너무 많이 나지 않게 초당 총량을 나눠 씀
+    let rS = 0, rK = 0, rP = 0;
+    const rates = [];
+    for (const g of L) {
+      const c = g.rec.c = Math.min(COOK.ash + 8, g.rec.c + dt * (g.bone ? 0.5 : 1));
+      const sz = g.sz;
+      const steam = (c < 0.7 ? 9 : 5 * Math.exp(-(c - 0.7) / 6.5) + 0.35 * Math.exp(-c / 40)) * sz;
+      const smoke = (2.6 * sstep(16, 30, c) * (1 - sstep(50, 74, c)) + 0.25 * sstep(5, 12, c) * (1 - sstep(12, 22, c))) * sz;
+      const pop = g.bone ? 0 : (g.rec.k === 'fat' ? 4.2 : 2.2) * Math.exp(-c / 9) * Math.min(1.6, sz) + 0.5 * sstep(24, 36, c) * (1 - sstep(48, 66, c));
+      rates.push(steam, smoke, pop);
+      rS += steam; rK += smoke; rP += pop;
+      level += (0.9 * Math.exp(-c / 11) + 0.22 * sstep(22, 38, c) * (1 - sstep(54, 76, c))) * Math.min(1.5, sz);
+      // 색: 날것 → 허옇게 익음 → 노릇 → 숯. 익으며 오그라들고, 다 타면 조금 더 쪼그라듦
+      const k = cookK(c);
+      g.U.uCook.value = k;
+      g.U.uFl.value = 0.75 + 0.25 * Math.sin(time * 7 + g.acc[0] * 20) * Math.sin(time * 3.1 + g.acc[1] * 9);
+      const shr = 1 - 0.2 * sstep(0, 26, c) - 0.08 * sstep(40, 70, c);
+      g.m.scale.set(g.s0.x * shr, g.s0.y * shr, g.s0.z * (1 - 0.3 * sstep(0, 30, c)));
+    }
+    const kS = Math.min(1, 70 / Math.max(1, rS)), kK = Math.min(1, 42 / Math.max(1, rK)), kP = Math.min(1, 26 / Math.max(1, rP));
+    for (let i = 0; i < L.length; i++) {
+      const g = L[i], p = g.m.position, sz = g.sz;
+      g.acc[0] += rates[i * 3] * kS * dt;
+      while (g.acc[0] >= 1) {
+        g.acc[0] -= 1;
+        G.steam.emit({ x: p.x + rnd(-0.003, 0.003), y: p.y + rnd(-0.002, 0.003), z: p.z + 0.003, vx: rnd(-0.025, 0.025), vy: rnd(0.05, 0.13), vz: rnd(0.005, 0.04), g: 0.06, drag: 0.7, life: rnd(0.8, 1.6), size: rnd(0.007, 0.014) * (0.7 + 0.3 * sz), grow: 3.6, a: rnd(0.22, 0.36) });
+      }
+      g.acc[1] += rates[i * 3 + 1] * kK * dt;
+      while (g.acc[1] >= 1) {
+        g.acc[1] -= 1;
+        G.smoke.emit({ x: p.x + rnd(-0.003, 0.003), y: p.y + rnd(-0.002, 0.003), z: p.z + 0.004, vx: rnd(-0.02, 0.02), vy: rnd(0.04, 0.1), vz: rnd(0.005, 0.03), g: 0.05, drag: 0.75, life: rnd(1.6, 3.0), size: rnd(0.013, 0.024), grow: 4.0, a: rnd(0.22, 0.38) });
+      }
+      g.acc[2] += rates[i * 3 + 2] * kP * dt;
+      while (g.acc[2] >= 1) {
+        g.acc[2] -= 1;
+        const a = rnd(0, Math.PI * 2), sp = rnd(0.25, 0.9);
+        G.spat.emit({ x: p.x + rnd(-0.002, 0.002), y: p.y + rnd(-0.002, 0.002), z: p.z + 0.002, vx: Math.cos(a) * sp * 0.6, vy: Math.abs(Math.sin(a)) * sp + 0.2, vz: rnd(0.1, 0.55), g: -6.5, drag: 0.5, life: rnd(0.18, 0.42), size: rnd(0.0012, 0.0026), grow: 0.6, a: 0.95, pop: 1 });
+        // 타닥 — 튀는 기름 몇 개에 하나꼴로 소리
+        if (this.sfx && Math.random() < 0.55 && G.popBudget > 0) { G.popBudget -= 1; this.sfx.play('fryPop', rnd(0.12, 0.34), { pan: clamp(p.x * 3, -0.7, 0.7), jitter: 0.25, verbAmt: 0.12 }); }
+      }
+    }
+    G.popBudget = Math.min(3, G.popBudget + dt * 16);
+    this.sfx?.grill?.(level);
   }
 
   smear(c, size) { this.blood.smear(c.x, c.y, size, rnd(-2.2, -0.9)); }
@@ -919,12 +1093,17 @@ export class FX {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), dir = new THREE.Vector3();
     let k = 0;
     const alive = [];
+    const hot = this.isHot();
     for (const d of this.drops) {
       d.t += dt; d.vy -= 9.8 * dt; d.vx *= 0.995; d.vz *= 0.995;
       d.x += d.vx * dt; d.y += d.vy * dt; d.z += d.vz * dt;
       if (d.z <= wallZ) {
-        // 벽에 닿음 → 점
+        // 벽에 닿음 → 점. 달군 철판이면 핏방울이 닿자마자 치익 끓어 김이 됨
         if (Math.random() < 0.85) this.blood.drop(d.x, d.y, d.r * rnd(0.8, 1.6));
+        if (hot && Math.random() < 0.55) {
+          this.grill.steam.emit({ x: d.x, y: d.y, z: wallZ + 0.003, vx: rnd(-0.02, 0.02), vy: rnd(0.06, 0.15), vz: rnd(0.01, 0.04), g: 0.06, drag: 0.7, life: rnd(0.4, 0.9), size: rnd(0.004, 0.008), grow: 3, a: rnd(0.16, 0.3) });
+          this.grill.flash = Math.min(2.2, this.grill.flash + 0.035);
+        }
         continue;
       }
       if (d.y < -0.9 || d.t > 3 || d.z > 0.2) continue;
@@ -964,6 +1143,8 @@ export class FX {
     }
     this.flying = keep;
     this.blood.update(dt, time);
+    this.updateGrill(dt, time);
+    this.grill.steam.update(dt); this.grill.smoke.update(dt); this.grill.spat.update(dt);
     this.smoke.update(dt); this.steam.update(dt); this.sparkP.update(dt); this.sparkB.update(dt); this.frost.update(dt);
     this.dust.update(rdt); this.grit.update(rdt);
     this.updatePowerImpact(rdt);

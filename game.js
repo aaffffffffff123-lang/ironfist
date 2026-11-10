@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from './room-env.js';
 import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT } from './arm.js';
-import { WALLS, createWall, hitter } from './walls.js';
+import { WALLS, createWall, hitter, PAIN_TOP } from './walls.js';
 import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
 import { Scrap, SCRAP_KINDS, pickScrapKind } from './scrap.js';
@@ -24,7 +24,8 @@ const E_BLEED = 1.2;                 // 유리가 박혀 피가 새는 동안 �
 const TKD_GAP = 0.33, TKD_BONUS = 0.06;   // 세 대를 이 간격(실제 초) 안에 번갈아 치면 그 세 대의 6% 더
 // 지금 가장 높은 벽을 연 뒤로 이만큼 쌓이면 다음 벽이 열림(시멘트→자갈, 자갈→소주병 …). 보통 속도로 맨손 한 판 + 고철 한 판쯤.
 // 벽마다 보통 속도 맨손 한 판 참을성의 1.1배 — 운이 나빠 덜 쌓인 판이어도 고철 한 판이면 채워짐. 넘친 건 다음 벽으로 안 넘어감
-const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 40960];
+// 마지막 A4 용지는 가시벽을 연 뒤로 새 손 주기만큼(맨손 한 판 + 고철 한 판쯤) 견디면 열림
+const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 40960, 31040];
 const HANDS_SPAN = 31040;            // 벽이 다 열린 뒤로는 이만큼 쌓일 때마다 새 손
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
@@ -93,9 +94,13 @@ const G = {
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
   scrapEquips: 0,
+  cleared: false,          // A4를 찢어 끝을 봤음 — 그 뒤로는 벽·손을 마음대로
   decals: {}, stuck: {}, old: {},
   seenHints: {}, seenSkill: {},
 };
+// ?test=1 : 저장을 건드리지 않고 마지막(A4, 철권 장착)부터 시험
+const TEST = QS.get('test');
+let noSave = false;
 let assets, arms = {}, wall = null, fx, sfx, ui, skillFx = null;
 let mode = 'title';      // title | play | over | shop
 let round = null;
@@ -105,6 +110,7 @@ let layout = { portrait: false, k: 1 };
 let baseFov = 58;
 
 function save() {
+  if (noSave) return;
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch (e) {}
 }
 function load() {
@@ -137,6 +143,7 @@ function load() {
       G.v = 2;
     }
     if (!(G.openedAt >= 0) || G.openedAt > G.endure) G.openedAt = G.endure;
+    G.cleared = !!s.cleared && G.owned.includes('paper');
     return true;
   } catch (e) { return false; }
 }
@@ -168,7 +175,10 @@ function poses(side, armObj) {
   const aim = fists[side] ? fists[side].aimOff : null;
   const hitTarget = new THREE.Vector3(-(p ? 0.044 : 0.058) + (aim ? aim.x : 0), (p ? -0.045 : -0.05) + (aim ? aim.y : 0), -WALL_D);
   const hitU = new THREE.Vector3(-0.10, 1, 0);
-  const reach = armObj ? armObj.reach() : 0.097;
+  // 타격면까지 거리·가드에서 내미는 거리는 팔마다 부드럽게 따라가는 값(철권이 부서지거나 그루터기로 따라 들어갈 때 팔이 튀지 않게)
+  const f = fists[side];
+  const reach = f && f.reachS !== null ? f.reachS : armObj ? armObj.reach() : 0.097;
+  const shiftR = f && f.shiftS !== null ? f.shiftS : armObj ? armObj.restShift() : 0;
   const stop = wall ? wall.stopDepth : 0;
   const contact = hitTarget.clone(); contact.z += stop;
   const D1 = contact.clone().sub(shoulder).normalize();
@@ -180,6 +190,8 @@ function poses(side, armObj) {
     q0 = mirrorQ(q0); q1 = mirrorQ(q1);
   }
   const D0 = AX_Z.clone().applyQuaternion(q0); // 가드의 손목→주먹 방향
+  // 짧아진 그루터기에 단 철권: 가드에서도 팔을 그만큼 앞으로 내밀어 주먹이 늘 같은 자리에 보이게
+  if (shiftR > 1e-5) p0.addScaledVector(D0, shiftR);
   return { p0, q0, p1, q1, D0, D1: s < 0 ? new THREE.Vector3(-D1.x, D1.y, D1.z) : D1, contact };
 }
 
@@ -282,6 +294,15 @@ class Fist {
     this.comp = 0; this.compT = 0; this.push = 0.009; this.squashK = 1;
     this.ripA = 0; this.ripZ = 0.016;
     this.flick = 0; this.flickV = 0;     // 손목 튕김 스프링(라디안)
+    this.reachS = null; this.shiftS = null;   // 다음 프레임에 지금 값으로 바로 맞춤
+  }
+  // 타격면 거리·가드에서 내미는 거리를 실제 시간으로 부드럽게 따라감
+  follow(rdt) {
+    const r = this.arm.reach(), sh = this.arm.restShift();
+    if (this.reachS === null) { this.reachS = r; this.shiftS = sh; return; }
+    const k = 1 - Math.exp(-Math.max(0, rdt) / 0.06);
+    this.reachS += (r - this.reachS) * k;
+    this.shiftS += (sh - this.shiftS) * k;
   }
   press(now) {
     const st = this.state;
@@ -582,6 +603,7 @@ function payTkd(group) {
 function onImpact(fist, now) {
   if (mode !== 'play' || !round || round.ended) { fist.punchCharge = 0; fist.goBack(BACK_T); return; }
   const a = fist.arm;
+  if (wall.def.paper) { paperImpact(fist, a); return; }
   const chargeK = fist.autoPunch ? 0 : clamp(fist.punchCharge || 0, 0, 1);
   const chargeHit = smooth(chargeK);
   // 아주 짧은 실수 홀드는 일반타처럼 보이고 들린다. 의미 있게 모은 구간부터 전용 연출을 서서히 연다.
@@ -628,7 +650,7 @@ function onImpact(fist, now) {
   // 연출 — power: 피·살점 양, feel: 손맛(멈춤·화면 반동·떨림)
   const power = clamp(0.4 + res.flesh * 40 + res.ev.length * 0.3, 0.3, 1.6);
   const evW = eventWeight(res.ev);
-  const tier = WALLS.indexOf(W) / (WALLS.length - 1);
+  const tier = Math.min(1, WALLS.indexOf(W) / PAIN_TOP);
   const feel = clamp(0.8 + tier * 0.25 + evW, 0.6, 1.9);
   fx.impact(a, P.contact, power, res, W, react);
   fx.impactDust(P.contact, W.id, feel, striker);
@@ -675,6 +697,56 @@ function onImpact(fist, now) {
   checkRoundEnd();
 }
 
+// A4 용지: 아무 저항 없이 뚫고 지나감 — 손은 안 다치고, 참을성도 쌓이지 않고, 몸만 살짝 앞으로 쏠림
+function paperImpact(fist, a) {
+  const P = poses(a.side, a);
+  fx.lastContact = P.contact.clone();
+  // 종이 면을 지나는 순간을 놓쳤으면(아주 느린 기기) 여기서 찢음
+  if (wall.state === 'intact') wall.tear(P.contact.x, P.contact.y, a.side, !!(a.scrap && a.scrap.lumpHP > 0));
+  skillFx?.impact(a.side, P.contact, 0, {});   // 모으던 상태만 정리
+  if (fist.pendingChain) { const l = fist.pendingChain; l.units = 0; l.done = true; fist.pendingChain = null; if (l.group) payTkd(l.group); }
+  fist.rushing = false; fist.barrage = 0; fist.aimOff.set(0, 0, 0);
+  fist.punchCharge = 0;
+  fist.hold = 0.03;
+  fist.flickV -= 0.5;
+  cam.push.kick(-0.0032); cam.pitch.kick(-0.22 * D2R);
+  round.punches++;
+  vibrate(8);
+}
+
+// A4를 처음 찢음 = 끝. 찢긴 종이가 흔들리는 걸 잠깐 보여 준 뒤 끝 화면
+let endingTimer = 0;
+function onPaperTorn() {
+  if (G.cleared || mode !== 'play' || !round || round.ended) return;
+  G.cleared = true;
+  round.ended = true; round.endT = time;
+  G.stats.rounds++;
+  cancelAllInputs();
+  for (const f of Object.values(fists)) { f.queue = 0; f.autoPunch = false; f.pendingChain = null; f.spasm = 0; f.barrage = 0; f.rushing = false; f.aimOff.set(0, 0, 0); }
+  chain = [];
+  for (const s of ['L', 'R']) G.arms[s] = armSnapshot(arms[s]);
+  fx.persist();
+  save();
+  clearTimeout(endingTimer);
+  endingTimer = setTimeout(showEnding, 2700);
+}
+function showEnding() {
+  if (mode !== 'play' || !round || !round.ended) return;
+  mode = 'ending';
+  document.body.classList.remove('playing');
+  cancelAllInputs();
+  skillFx?.clear();
+  ui.hud(false);
+  ui.showEnding({ rounds: G.stats.rounds || 0, scrap: G.scrapEquips || 0, endure: G.stats.total || 0 });
+}
+// 다 끝난 뒤에는 판이 끝나지 않아 팔 상태를 수시로 저장
+function saveFree() {
+  if (!G.cleared) return;
+  for (const s of ['L', 'R']) G.arms[s] = armSnapshot(arms[s]);
+  fx.persist();
+  save();
+}
+
 // mfract: 손등뼈 골절(너클이 꺼짐), fract: 손가락뼈 골절, open: 뼈가 살을 뚫고 나옴, nail: 손톱이 깨짐
 // crush: 앞면이 더 짓이겨짐, finger: 손가락이 짓이겨져 뭉개짐, hand: 손목 위가 다 없어짐, stump: 팔뚝 끝이 짓이겨짐
 const EV_ENDURE = { mfract: 9, fract: 7, open: 12, nail: 6, finger: 12, wrist: 18, hand: 30, crush: 0, stump: 1.5, lumpGone: 45, pipeGone: 10 };
@@ -697,9 +769,11 @@ function handleEvent(a, e, contact) {
     case 'mfract': sfx.play('crack', 1.0, { rate: 0.8 }); sfx.play('knuckle', 0.55, { rate: 0.62 }); hitstop = Math.max(hitstop, 0.1); round.fract++; break;
     case 'fract': sfx.play('crack', 0.85); hitstop = Math.max(hitstop, 0.08); round.fract++; break;
     case 'open': {
-      sfx.play('bonePop', 0.95); hitstop = Math.max(hitstop, 0.07);
+      // 손등뼈가 살을 뚫고 튀어나옴: 우득 + 피가 위로 찍
+      sfx.play('bonePop', 1.0); sfx.play('crack', 0.6, { rate: 0.9, delay: 0.01 });
+      hitstop = Math.max(hitstop, 0.085);
       const sh = a.shards[a.shards.length - 1];
-      if (sh) fx.spurt(sh.getWorldPosition(new THREE.Vector3()), 16);
+      if (sh) fx.spurt(sh.getWorldPosition(new THREE.Vector3()), 26);
       break;
     }
     case 'nail': sfx.play('nailRip', 0.6); round.nail++; break;
@@ -828,6 +902,8 @@ function newRound() {
 function checkRoundEnd() {
   if (!round || round.ended) return;
   const L = arms.L, R = arms.R;
+  // 다 끝난 뒤엔 판이 끝나지 않음 — 손은 위 '손 바꾸기'에서 마음대로
+  if (G.cleared) { if (!L.hasFist() && !R.hasFist()) showHint('freeHands'); return; }
   if (!L.hasFist() && !R.hasFist()) {
     round.ended = true; round.endT = time;
     cancelAllInputs();
@@ -861,10 +937,13 @@ function endRound() {
       setWall(g.wall.id);
       round.opened = g.wall.id;
     }
-    freshHands();
-    round.fresh = true;
+    // A4는 철권을 단 채로 마주함 — 새 손을 주지 않고 장착 화면에서 양손에 철권을 닮
+    if (!(g.kind === 'wall' && g.wall.paper)) {
+      freshHands();
+      round.fresh = true;
+      setTimeout(() => sfx.play('restore', 0.8), 380);
+    }
     G.openedAt = G.endure;   // 새 벽(새 손)부터 막대를 다시 채움
-    setTimeout(() => sfx.play('restore', 0.8), 380);
   }
   save();
   ui.showShop(round);
@@ -884,8 +963,9 @@ function setWall(id) {
   id = def.id;
   skillFx?.clear();
   if (wall) { fx.clearPowerImpact?.(); fx.persist(); wall.dispose(); }
-  wall = createWall(id, { scene, renderer, fx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
+  wall = createWall(id, { scene, renderer, fx, sfx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
   G.wall = id;
+  if (wall.def.paper) { wall.onTear = onPaperTorn; wall.autoRenew = !!G.cleared; }
   fx.bindWall(wall);
   // 모아치기 기술은 지금 벽을 따라감
   skillFx?.setSkill(SKILL_OF[id]);
@@ -988,7 +1068,7 @@ window.addEventListener('mouseup', (e) => {
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 // 다른 앱·탭으로 가거나 화면이 꺼지면 소리를 통째로 멈추고, 돌아오면 다시 켬
-function goBackground() { cancelAllInputs(); sfx?.suspend(); }
+function goBackground() { cancelAllInputs(); sfx?.suspend(); if (G.cleared && mode === 'play' && fx) saveFree(); }
 function comeBack() { if (!document.hidden && document.hasFocus()) sfx?.resume(); }
 window.addEventListener('blur', goBackground);
 window.addEventListener('focus', comeBack);
@@ -1064,6 +1144,7 @@ function step(dt, rdt = dt) {
     f.tremble = fear;
     if (mode === 'play') f.update(dt, time, rdt);
     f.feel(rdt);
+    f.follow(rdt);
     f.pose(_pos);
     A.root.position.copy(_pos.position);
     A.root.quaternion.copy(_pos.quaternion);
@@ -1150,12 +1231,20 @@ function render() {
 // ------------------------------------------------------------------ 시작
 async function boot() {
   resize();
-  const hadSave = load();
+  let hadSave = load();
+  if (TEST) {
+    // 시험용: 저장은 그대로 두고, 벽을 다 연 채 A4 앞에서 양손 철권으로 시작
+    noSave = true; hadSave = true;
+    G.owned = WALLS.map((w) => w.id); G.wall = 'paper'; G.cleared = false; G.openedAt = G.endure;
+    G.arms = { L: { I: 0.5, scrap: { lump: 140, pipe: 0, seed: 11, kind: 'base' } }, R: { I: 0.5, scrap: { lump: 140, pipe: 0, seed: 23, kind: 'wire' } } };
+    G.seenHints = Object.assign({}, G.seenHints, { controls: true });
+  }
   assets = await loadArmAssets();
   initAnatomy(assets.header);
   fx = new FX(scene, renderer, G, lightPool);
   fx.anat = ANAT;
   sfx = new SFX();
+  fx.sfx = sfx;
   // 소리를 꺼 두고 나갔으면 다시 들어와도 꺼진 채로
   sfx.setMuted(!!G.muted);
   await sfx.prepare();
@@ -1238,7 +1327,7 @@ async function boot() {
 function warmup() {
   const tmp = [];
   const add = (m) => { m.position.set(0, -0.2, -0.5); scene.add(m); tmp.push(m); };
-  for (const mat of [fx.meatMat, fx.fatMat, fx.boneMat, fx.skinBitMat, fx.nailMat, fx.dropMat, fx.driedMat, fx.charMat, arms.L.shardMat, arms.R.shardMat, arms.L.pulpMat, arms.R.pulpMat, arms.L.flapMat, arms.R.flapMat]) add(new THREE.Mesh(fx.meatGeos[0], mat));
+  for (const mat of [fx.meatMat, fx.fatMat, fx.boneMat, fx.skinBitMat, fx.nailMat, fx.dropMat, fx.driedMat, fx.charMat, arms.L.shardMat, arms.R.shardMat, arms.L.boneTipMat, arms.R.boneTipMat, arms.L.pulpMat, arms.R.pulpMat, arms.L.flapMat, arms.R.flapMat, ...fx.warmMats()]) add(new THREE.Mesh(fx.meatGeos[0], mat));
   // 속살·뼈는 살이 터지기 전엔 숨어 있음 → 처음 터질 때 멈칫하지 않게 미리 컴파일
   const hidden = [];
   for (const s of ['L', 'R']) for (const m of [arms[s].meat, arms[s].bone]) if (!m.visible) { m.visible = true; hidden.push(m); }
@@ -1252,16 +1341,16 @@ function restoreArm(a, snap) {
   a.reset();
   if (!snap || !(snap.I > 0)) return;
   a.setStump(snap.I);
-  if (snap.scrap) {
+  // 덩어리가 남은 철권만 다시 닮(쇠로 메운 팔뚝은 없음). 덩어리가 다 떨어졌던 팔은 그루터기만
+  if (snap.scrap && snap.scrap.lump > 0) {
     a.scrapSeed = snap.scrap.seed;
     const kind = SCRAP_KINDS.includes(snap.scrap.kind) ? snap.scrap.kind : 'base';
     a.scrapObj = new Scrap(a, snap.scrap.seed, kind);
     a.scrap = a.scrapObj.state;
-    a.scrap.lumpHP = snap.scrap.lump;
-    // 직전 회귀 버전은 쇠팔뚝을 만들지 않아 pipe를 0으로 저장했다.
-    // 양수인 실제 손상값만 복원하고, 0이면 현재 팔 길이에 맞춰 새로 만든 쇠팔뚝을 살린다.
-    if (Number.isFinite(snap.scrap.pipe) && snap.scrap.pipe > 0) a.scrap.pipeHP = Math.min(a.scrap.pipeHP, snap.scrap.pipe);
-    if (a.scrap.lumpHP <= 0) a.scrapObj.onDamage('lump', { flyScrapPart: (p) => p.parent && p.parent.remove(p) }, null, null);
+    a.scrap.lumpHP = Math.min(a.scrapObj.totalLump, snap.scrap.lump);
+    a.scrap.pipeHP = 0;
+    // 부서졌던 만큼 앞쪽 부품이 떨어져 나간 모양으로
+    if (a.scrap.lumpHP < a.scrapObj.totalLump) a.scrapObj.onDamage('lump', { flyScrapPart: (p) => p.parent && p.parent.remove(p) }, null, null);
   }
 }
 
@@ -1273,22 +1362,42 @@ const actions = {
   },
   start() {
     sfx.unlock();
-    if (!arms.L.hasFist() && !arms.R.hasFist()) {
+    // 다 끝난 뒤엔 장착 화면 없이 바로(손은 위에서 바꿈)
+    if (!G.cleared && !actions.canStart()) {
       mode = 'shop';
       document.body.classList.remove('playing');
       ui.hidePanels(); ui.showShop(round || blankRound());
       return false;
     }
+    clearTimeout(endingTimer);
     mode = 'play';
     document.body.classList.add('playing');
     newRound();
+    if (wall && wall.def.paper) { wall.autoRenew = !!G.cleared; if (wall.state !== 'intact') wall.renew(); }
     ui.endure(goal());
     render();
     ui.hidePanels(); ui.hud(true);
     if (!G.seenHints.controls) showHint('controls');
+    else if (G.cleared) showHint('free');
     return true;
   },
+  // 끝 화면 → 계속 치기
+  free() {
+    if (!G.cleared) return;
+    clearTimeout(endingTimer);
+    ui.hideEnding();
+    mode = 'play';
+    document.body.classList.add('playing');
+    newRound();
+    if (wall && wall.def.paper) { wall.autoRenew = true; wall.renew(); }
+    ui.endure(goal());
+    ui.hidePanels(); ui.hud(true);
+    showHint('free');
+    render();
+  },
+  isFree() { return !!G.cleared; },
   newGame() {
+    if (noSave) { location.reload(); return; }
     try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
     location.reload();
   },
@@ -1306,10 +1415,44 @@ const actions = {
       for (const side of ['L', 'R']) resetArmMotion(side);
     }
     setWall(id);
-    save();
+    if (G.cleared) saveFree(); else save();
     sfx.play('click', 0.5);
     return true;
   },
+  // 다 끝난 뒤: 손을 마음대로 — 'flesh' 새 맨손 / 'scrap' 철권(손이 멀쩡해도 떼고 닮, 철권이 있으면 갈아 끼움)
+  equip(side, kind) {
+    if (!G.cleared || mode !== 'play') return false;
+    const sides = side === 'both' ? ['L', 'R'] : [side];
+    sides.forEach((s, n) => {
+      const a = arms[s], prevI = a.I;
+      if (fists[s].inputHeld) fists[s].cancelHold();
+      inputOwner[s] = null;
+      if (a.scrapObj) a.scrapObj.dispose();
+      a.scrapObj = null;
+      a.reset();
+      if (kind === 'scrap') {
+        // 손이 있으면 손목까지 떼고, 이미 짧아진 팔이면 그 그루터기 끝에 바로 닮
+        a.setStump(Math.max(0.5, prevI));
+        a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
+        a.scrapObj = new Scrap(a, a.scrapSeed, pickScrapKind(G.scrapEquips));
+        a.scrap = a.scrapObj.state;
+        G.scrapEquips = Math.max(0, Number.isFinite(G.scrapEquips) ? Math.floor(G.scrapEquips) : 0) + 1;
+      }
+      resetArmMotion(s);
+      G.arms[s] = armSnapshot(a);
+      // 철권은 장착 화면과 같은 모루 소리, 맨손은 새 손 소리. 양손이면 살짝 엇갈리게
+      const play = () => { if (kind === 'scrap') sfx.equip(a.scrapObj ? a.scrapObj.kind : 'base', s); else sfx.play('restore', 0.75, { pan: s === 'L' ? -0.3 : 0.3 }); };
+      if (n) setTimeout(play, 140); else play();
+      if (kind === 'scrap' && a.scrapObj) { a.root.updateMatrixWorld(true); fx.sparks(a.scrapObj.lump.getWorldPosition(new THREE.Vector3()), 16, 0xffd28a); }
+    });
+    cam.trauma = Math.min(1, cam.trauma + (kind === 'scrap' ? 0.34 : 0.16));
+    cam.pitch.kick((kind === 'scrap' ? -0.7 : 0.3) * D2R);
+    chain = [];
+    saveFree();
+    return true;
+  },
+  // 팔 상태 한 단어(손 바꾸기 창)
+  handState(s) { const a = arms[s]; if (a.scrap && a.scrap.lumpHP > 0) return '철권'; if (a.I < 0.5) return a.I < 0.004 ? '맨손' : '다친 손'; return '손 없음'; },
   // 철권은 공짜 — 박살나면 또 장착함
   scrap(side) {
     const a = arms[side];
@@ -1324,7 +1467,11 @@ const actions = {
     G.arms[side] = armSnapshot(a);
     save(); sfx.equip(kind, side); return kind;
   },
-  canStart() { return arms.L.hasFist() || arms.R.hasFist(); },
+  // A4 앞에서는 양손 다 단 채로 시작
+  canStart() {
+    if (!G.cleared && G.wall === 'paper') return arms.L.hasFist() && arms.R.hasFist();
+    return arms.L.hasFist() || arms.R.hasFist();
+  },
   goal: () => goal(),
   nextWall: () => nextWall(),
   armInfo(s) { const a = arms[s]; return { flesh: a.I < 0.5, I: a.I, scrap: !!(a.scrap && a.scrap.lumpHP > 0), fist: a.hasFist(), crushed: a.crushZ < 0.095, broken: a.brokenK() > 0 }; },

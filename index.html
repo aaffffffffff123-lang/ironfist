@@ -166,11 +166,38 @@ body.playing #sound{display:none}
 .wall .wp small{font-size:10px;color:var(--ink2)}
 .next{flex-shrink:0;position:relative;padding:12px 20px calc(14px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:8px}
 .next .btn{width:100%;font-size:17px;padding:15px 8px}
+#endureBox[hidden]{display:none}
+/* 다 끝난 뒤: 손 바꾸기(참을성 막대 자리) */
+#handBtn{position:absolute;z-index:2;right:calc(10px + env(safe-area-inset-right));top:calc(10px + env(safe-area-inset-top));min-height:36px;padding:7px 26px 7px 12px;border:0;border-radius:999px;font-size:13px;font-weight:900;cursor:pointer;pointer-events:auto;white-space:nowrap}
+#handBtn[hidden]{display:none}
+#handBtn::after{content:'▾';position:absolute;right:10px;top:50%;transform:translateY(-52%);font-size:11px}
+#handBtn[aria-expanded="true"]::after{content:'▴'}
+#handMenu{position:absolute;z-index:1;inset:0;display:none;pointer-events:auto;background:rgba(0,0,0,.08)}
+#handMenu.show{display:block}
+.handPanel{position:absolute;right:calc(10px + env(safe-area-inset-right));top:calc(56px + env(safe-area-inset-top));width:min(92vw,330px);padding:10px;display:flex;flex-direction:column;gap:7px}
+.handRow{display:grid;grid-template-columns:minmax(0,1fr) 76px 76px;align-items:center;gap:7px}
+.handRow .hs{display:flex;flex-direction:column;gap:2px;min-width:0;padding-left:4px}
+.handRow .hs b{font-size:13px;font-weight:900}
+.handRow .hs small{font-size:11px;font-weight:700}
+.handRow button{min-height:44px;border-radius:9px;font-size:13px;font-weight:900;cursor:pointer}
+.handRow.both{margin-top:3px;padding-top:9px}
+/* 끝 */
+#ending{position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(247,245,240,.9);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .9s ease,visibility .9s}
+#ending.show{opacity:1;visibility:visible;pointer-events:auto}
+.endCard{display:flex;flex-direction:column;align-items:center;text-align:center;transform:translateY(10px);transition:transform 1.1s cubic-bezier(.2,.8,.2,1)}
+#ending.show .endCard{transform:none}
+.endWord{margin:0;font-size:clamp(76px,min(24vw,20vh),132px);font-weight:900;line-height:1;letter-spacing:-.02em;color:var(--ink)}
+.endStats{display:flex;flex-wrap:wrap;justify-content:center;gap:10px 26px;margin:clamp(22px,5vh,40px) 0 clamp(26px,6vh,46px)}
+.endStats div{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:84px}
+.endStats span{font-size:12px;font-weight:700;color:var(--ink2)}
+.endStats b{font-size:20px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--ink)}
+.endBtns{display:flex;flex-direction:column;align-items:center;gap:12px}
+.endBtns #btnFree{min-width:220px}
 /* 좁은 화면: 벽 이름을 참을성 막대 아래 줄로 */
-@media (max-width:560px){#wallName{top:calc(54px + env(safe-area-inset-top));max-width:80vw}.playWallPanel{top:calc(98px + env(safe-area-inset-top))}}
+@media (max-width:560px){#wallName{top:calc(54px + env(safe-area-inset-top));max-width:80vw}.playWallPanel,.handPanel{top:calc(98px + env(safe-area-inset-top))}}
 @media (max-width:380px){.shopBody{padding:16px 12px}.next{padding-left:12px;padding-right:12px}.arm{padding:10px 7px}.wall .sw{display:none}#endureBox .bar{width:78px}}
 </style>
-<link rel="stylesheet" href="forge-ui.css?v=6">
+<link rel="stylesheet" href="forge-ui.css?v=7">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -204,8 +231,26 @@ body.playing #sound{display:none}
   <button id="wallName" type="button" aria-expanded="false" aria-controls="playWallMenu" disabled></button>
   <div id="playWallMenu" aria-hidden="true"><div class="playWallPanel" role="dialog" aria-label="벽 변경"><div id="playWalls"></div></div></div>
   <div id="endureBox" role="progressbar" aria-label="참을성" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="lbl">참을성</span><span class="bar"><i id="endureFill"></i></span></div>
+  <button id="handBtn" type="button" aria-expanded="false" aria-controls="handMenu" hidden disabled>손 바꾸기</button>
+  <div id="handMenu" aria-hidden="true"><div class="handPanel" role="dialog" aria-label="손 바꾸기">
+    <div class="handRow" data-side="L"><span class="hs"><b>왼팔</b><small></small></span><button type="button" data-kind="flesh">맨손</button><button type="button" data-kind="scrap">철권</button></div>
+    <div class="handRow" data-side="R"><span class="hs"><b>오른팔</b><small></small></span><button type="button" data-kind="flesh">맨손</button><button type="button" data-kind="scrap">철권</button></div>
+    <div class="handRow both" data-side="both"><span class="hs"><b>양팔</b></span><button type="button" data-kind="flesh">맨손</button><button type="button" data-kind="scrap">철권</button></div>
+  </div></div>
 </div>
 <div id="hint"></div>
+
+<section id="ending" aria-hidden="true" inert>
+  <div class="endCard">
+    <p class="endWord">끝</p>
+    <div class="endStats">
+      <div><span>친 판</span><b id="eRounds">0판</b></div>
+      <div><span>갈아 끼운 철권</span><b id="eScrap">0개</b></div>
+      <div><span>기른 참을성</span><b id="eEndure">0</b></div>
+    </div>
+    <div class="endBtns"><button class="btn" id="btnFree">계속 치기</button><button class="btn ghost" id="btnRestart">처음부터</button></div>
+  </div>
+</section>
 
 <section id="shop" role="dialog" aria-modal="true" aria-labelledby="shopTitle" aria-hidden="true" inert>
   <div class="sheet">
@@ -231,8 +276,8 @@ body.playing #sound{display:none}
 <div id="err"></div>
 
 <!-- ?v= : 고친 파일을 올렸을 때 예전 파일이 브라우저 캐시에서 섞여 나오지 않게 -->
-<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=7","./fx.js":"./fx.js?v=5","./sfx.js":"./sfx.js?v=16","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=11","./scrap.js":"./scrap.js?v=14","./ui.js":"./ui.js?v=15","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
-<script type="module" src="./game.js?v=32"></script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=8","./fx.js":"./fx.js?v=6","./sfx.js":"./sfx.js?v=17","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=12","./scrap.js":"./scrap.js?v=15","./ui.js":"./ui.js?v=16","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
+<script type="module" src="./game.js?v=33"></script>
 </body>
 </html>
 

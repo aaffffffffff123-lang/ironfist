@@ -472,6 +472,78 @@ function design(S) {
     return out;
   }, 3);
 
+  // 갓 떨어진 살이 달군 철판에 눌어붙는 순간: 철퍽 + 치이익(순식간에 터지는 쉬익, 빽빽하다 성겨지는 잔 튐, 굵은 기름 탁탁)
+  put('sear', () => {
+    const d = 1.0, o = S.buf(d);
+    const slap = S.filt(S.noise(Math.floor(0.03 * S.sr)), 'bp', rnd(420, 650), 0.9);
+    S.add(o, S.mul(slap, S.envExp(slap.length, 0.0008, 0.008)), 0, 0.45);
+    const h = S.filt(S.filt(S.noise(o.length), 'hp', 1700, 0.7), 'lp', 11000, 0.7);
+    const fm = rnd(4, 6.5);
+    for (let i = 0; i < h.length; i++) { const t = i / S.sr; h[i] *= Math.min(1, t / 0.006) * (0.7 * Math.exp(-t / 0.15) + 0.3 * Math.exp(-t / 0.5)) * (0.78 + 0.22 * Math.sin(TAU * fm * t + 1)); }
+    S.add(o, h, 0, 0.5);
+    S.add(o, S.grains(d, 950, 2600, 9000, 0.0002, 0.0007, (r) => -Math.log(1 - r * 0.985) * 0.15, 2.5), 0, 0.95);
+    S.add(o, S.grains(0.6, 70, 900, 2800, 0.0012, 0.004, (r) => r * r * 0.6, 3), 0.012, 0.7);
+    return S.filt(S.filt(o, 'hp', 160, 0.7), 'lp', 10500, 0.7);
+  }, 4);
+  // 튀는 기름 한 방울 '탁'
+  put('fryPop', () => {
+    // 기름방울이 터지는 '탁': 짧은 울림이 있는 딱 소리 + 아주 짧은 치익 꼬리(너무 가늘게 째지지 않게 고역은 깎음)
+    const o = S.buf(0.06), f = rnd(1900, 4200);
+    const click = S.filt(S.noise(Math.floor(0.0012 * S.sr) + 4), 'lp', 6500, 0.7);
+    S.add(o, S.mul(click, S.envExp(click.length, 0.00005, 0.0004)), 0, 0.8);
+    S.add(o, S.modal(0.03, [[f, 1, rnd(0.0018, 0.0035)], [f * rnd(1.6, 2.2), 0.35, 0.0015]], 0.00005), 0, 0.9);
+    const tl = S.filt(S.filt(S.noise(Math.floor(0.03 * S.sr)), 'hp', 2000, 0.7), 'lp', 8000, 0.7);
+    S.add(o, S.mul(tl, S.envExp(tl.length, 0.0004, 0.006)), 0.001, 0.3);
+    return o;
+  }, 8);
+
+  // 주먹이 종이를 뚫는 '팍': 팽팽한 종이가 터지는 날카로운 소리 + 짧은 종이 울림 + 밀려나는 바람
+  put('paperPunch', () => {
+    const o = S.buf(0.3);
+    const burst = S.filt(S.filt(S.noise(Math.floor(0.02 * S.sr)), 'hp', 900, 0.7), 'lp', 9000, 0.7);
+    S.add(o, S.mul(burst, S.envExp(burst.length, 0.00012, 0.0045)), 0, 1.0);
+    const drum = S.filt(S.noise(Math.floor(0.09 * S.sr)), 'bp', rnd(650, 950), 3.5);
+    S.add(o, S.mul(drum, S.envExp(drum.length, 0.0004, 0.016)), 0, 0.7);
+    S.add(o, S.grains(0.05, 70, 2500, 7500, 0.0002, 0.0008, (r) => r * r * 0.04, 3), 0.001, 0.6);
+    const air = S.filt(S.noise(Math.floor(0.12 * S.sr)), 'lp', 280, 0.8);
+    S.add(o, S.mul(air, S.envExp(air.length, 0.002, 0.03)), 0, 0.55);
+    return S.filt(o, 'hp', 70, 0.7);
+  }, 4);
+  // 찌이익: 종이 섬유가 잇달아 끊어짐
+  put('paperTear', () => {
+    const d = rnd(0.16, 0.24), o = S.buf(d + 0.05);
+    let t = 0;
+    while (t < d) {
+      const k = t / d;
+      t += (1 / (1400 + 2600 * Math.sin(Math.PI * Math.min(1, k * 1.3)))) * rnd(0.3, 1.7);
+      const r = S.filt(S.noise(Math.floor(rnd(0.0002, 0.0007) * S.sr) + 2), 'bp', rnd(1500, 5500), rnd(1.5, 4));
+      S.add(o, r, t, Math.pow(Math.sin(Math.PI * Math.min(1, k)), 0.5) * rnd(0.3, 1));
+    }
+    const bed = S.filt(S.noise(o.length), 'bp', 3200, 0.9);
+    for (let i = 0; i < bed.length; i++) { const tt = i / S.sr; bed[i] *= Math.pow(Math.sin(Math.PI * Math.min(1, tt / d)), 0.7) * (Math.random() < 0.3 ? 1 : 0.35); }
+    S.add(o, bed, 0, 0.35);
+    return o;
+  }, 4);
+  // 찢긴 두 장이 펄럭임
+  put('paperFlutter', () => {
+    const d = 0.75, o = S.buf(d);
+    const n = S.filt(S.filt(S.noise(o.length), 'bp', 900, 0.6), 'lp', 3000, 0.7);
+    const fr = rnd(9, 13);
+    for (let i = 0; i < n.length; i++) { const t = i / S.sr; o[i] = n[i] * Math.pow(Math.max(0, Math.sin(TAU * fr * t)), 3) * Math.exp(-t / 0.22) * Math.min(1, t / 0.01); }
+    return o;
+  }, 3);
+  // 새 종이를 끼움: 스윽 + 집게 '탁'
+  put('paperSet', () => {
+    const o = S.buf(0.4);
+    const sl = S.filt(S.noise(Math.floor(0.2 * S.sr)), 'bp', 2400, 0.8);
+    for (let i = 0; i < sl.length; i++) { const t = i / S.sr; sl[i] *= Math.sin(Math.PI * t / 0.2) ** 2; }
+    S.add(o, sl, 0, 0.45);
+    const snap = S.filt(S.noise(Math.floor(0.004 * S.sr)), 'hp', 2500, 0.7);
+    S.add(o, S.mul(snap, S.envExp(snap.length, 0.00005, 0.001)), 0.2, 0.9);
+    S.add(o, S.modal(0.08, [[rnd(2100, 2500), 0.5, 0.012], [rnd(4300, 4800), 0.3, 0.007]]), 0.2, 0.6);
+    return o;
+  }, 2);
+
   // 냉동 성에 바스락
   put('frost', () => {
     const out = S.buf(0.3);
@@ -802,6 +874,26 @@ function ambientBuffers(S) {
     for (let i = 0; i < n; i++) o[i] = o[i] * 1.2 + h[i] * 0.08 * (Math.random() < 0.04 ? 3 : 1);
     return o;
   });
+  // 철판 위 살이 익는 지글거림 — 크기는 재생 쪽에서 눌어붙은 살이 얼마나 끓는지에 맞춤
+  const crackle = (d, count, lo, hi, durLo, durHi, q) => {
+    const out = S.buf(d);
+    for (let k = 0; k < count; k++) {
+      const dur = rnd(durLo, durHi), g = S.noise(Math.floor(dur * S.sr) + 2);
+      for (let i = 0; i < g.length; i++) { const u = i / g.length; g[i] *= Math.sin(Math.PI * u) ** 2; }
+      S.add(out, S.filt(g, 'bp', rnd(lo, hi), q), Math.random() * d, Math.pow(Math.random(), 2.2));   // 대부분 작고 가끔 큼
+    }
+    return out;
+  };
+  loops.fry = mk(3, (d) => {
+    const n = Math.floor(d * S.sr);
+    const hiss = S.filt(S.filt(S.noise(n), 'hp', 2200, 0.7), 'lp', 10000, 0.7);
+    const o = new Float32Array(n);
+    let am = 0.8, tgt = 0.8;
+    for (let i = 0; i < n; i++) { if (i % 900 === 0) tgt = rnd(0.45, 1); am += (tgt - am) * 0.004; o[i] = hiss[i] * 0.3 * am; }
+    S.add(o, crackle(d, Math.floor(d * 750), 2600, 9000, 0.0002, 0.0007, 2.5), 0, 1.1);
+    S.add(o, crackle(d, Math.floor(d * 70), 900, 2600, 0.0015, 0.004, 3), 0, 0.85);
+    return S.filt(o, 'lp', 10500, 0.7);
+  });
   loops.electric = mk(4, (d) => {
     const n = Math.floor(d * S.sr), o = new Float32Array(n); let ph = 0;
     for (let i = 0; i < n; i++) { ph += 60 / S.sr; o[i] = Math.sin(TAU * ph) * 0.4 + Math.sin(TAU * ph * 2) * 0.3 + Math.sin(TAU * ph * 3) * 0.15 + Math.sin(TAU * ph * 5) * 0.06; }
@@ -837,8 +929,8 @@ function pcm16(b64) {
 }
 
 // 벽마다 어떤 재질 소리를 섞는지
-const MAT = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', electric: 'matMesh', spikes: null };
-const THUD = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', electric: 'matMesh', spikes: null };
+const MAT = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', electric: 'matMesh', spikes: null, paper: null };
+const THUD = { cement: 'matCement', gravel: 'matGravel', traps: 'matWood', glass: 'matCement', nails: 'matWood', freezer: 'matPanel', hotplate: 'matSteel', electric: 'matMesh', spikes: null, paper: null };
 
 // ------------------------------------------------------------------ 재생
 export class SFX {
@@ -1002,6 +1094,36 @@ export class SFX {
     const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime({ room: 0.05, freezer: 0.10, hotplate: 0.16, electric: 0.07 }[key], c.currentTime, 0.4);
     src.connect(g); g.connect(this.master); src.start();
     this.ambSrc = src; this.ambGain = g;
+  }
+  // 달군 철판 지글거림: level(눌어붙어 끓는 살의 양)에 맞춰 커지고 밝아짐. 매 프레임 불림
+  grill(level) {
+    if (!this.ready || !this.ctx || !this.amb || !this.amb.fry) return;
+    const L = Math.max(0, level || 0);
+    if (!this.fry && L < 0.003) return;
+    const c = this.ctx;
+    if (!this.fry) {
+      const src = c.createBufferSource(); src.buffer = this.amb.fry; src.loop = true;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 4000; f.Q.value = 0.5;
+      const g = c.createGain(); g.gain.value = 0;
+      const s = c.createGain(); s.gain.value = 0.16;
+      src.connect(f); f.connect(g); g.connect(this.master); g.connect(s); s.connect(this.verb);
+      src.start();
+      this.fry = { src, f, g, lvl: 0 };
+    }
+    const F = this.fry, gain = 0.62 * (1 - Math.exp(-L * 0.8));
+    if (Math.abs(gain - F.lvl) > 0.004) {
+      const now = c.currentTime;
+      F.g.gain.setTargetAtTime(gain, now, gain > F.lvl ? 0.03 : 0.12);
+      F.f.frequency.setTargetAtTime(2600 + 7400 * Math.min(1, L / 1.8), now, 0.08);
+      F.lvl = gain;
+    }
+  }
+  // 주먹이 A4를 뚫음: 팍 + 찌이익 + 펄럭
+  paperTear(side = 'L', big = false) {
+    const pan = side === 'L' ? -0.18 : 0.18;
+    this.play('paperPunch', big ? 0.95 : 0.85, { pan, jitter: 0.05, verbAmt: 0.35 });
+    this.play('paperTear', 0.78, { pan: pan * 0.5, delay: 0.004, jitter: 0.08, verbAmt: 0.3 });
+    this.play('paperFlutter', 0.42, { delay: 0.07, jitter: 0.1, verbAmt: 0.4 });
   }
   // 모아치기 전용 추가 층. 기존 impact()의 벽·살 소리는 그대로 두고,
   // 접촉의 질량과 늦게 밀려오는 방 울림만 더한다.

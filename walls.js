@@ -16,7 +16,11 @@ export const WALLS = [
   { id: 'hotplate', name: '달군 철판', mult: 9.0, dmg: 0.0185, scrapDmg: 12, pace: 0.28, space: 0.23, fear: 0.75, kind: { burn: 0.45 } },
   { id: 'electric', name: '전기 벽', mult: 15.5, dmg: 0.0200, scrapDmg: 14, pace: 0.085, space: 0.072, fear: 0.9, kind: { elec: 0.55 } },
   { id: 'spikes', name: '쇠꼬챙이 가시벽', mult: 20.0, dmg: 0.0260, scrapDmg: 18, pace: 0.235, space: 0.17, fear: 1.0, kind: { punct: 1 } },
+  // 마지막: 위아래를 집게로 물린 A4 한 장. 살짝만 쳐도 찢어지고, 손은 안 다침
+  { id: 'paper', name: 'A4 용지', mult: 0, dmg: 0, scrapDmg: 0, pace: 1, space: 1, fear: 0, kind: {}, paper: true },
 ];
+// 아픈 벽 중 마지막(가시벽) — 타격감 단계 계산 기준
+export const PAIN_TOP = WALLS.findIndex((w) => w.id === 'spikes');
 // 가시벽에 먼저 다녀간 사람이 남긴 고철 주먹이 꿰여 있는 꼬챙이 자리(벽 좌표)
 export const OLD_FIST_AT = { x: -0.0975, y: 0.135 };
 
@@ -898,7 +902,7 @@ class SpikeWall extends WallBase {
   // 먼저 다녀간 사람의 고철 주먹: 꼬챙이에 꿰인 채 버려져 녹슬어 있음
   addOldFist() {
     const holder = { attach: { forearm: new THREE.Group() }, cutZ: -0.03, traps: [] };
-    const sc = new Scrap(holder, 4243);
+    const sc = new Scrap(holder, 4243, 'base', { fill: true });
     if (sc.glow) sc.glow.parent && sc.glow.parent.remove(sc.glow);
     const g = holder.attach.forearm;
     const rustSurf = `
@@ -959,6 +963,318 @@ class SpikeWall extends WallBase {
   }
 }
 
+// ------------------------------------------------------------------ 10. A4 용지
+// 위아래를 집게로 단단히 물린 A4 한 장. 주먹이 닿으면 저항 없이 가로로 찢어져
+// 위쪽은 집게에 매달려 흔들리고, 아래쪽은 집게 뒤로 꺾여 늘어짐. 주먹이 뚫고 나간 자리는 구멍
+export const A4 = { w: 0.210, h: 0.297, x: 0, y: -0.048 };
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) * 0.82;
+
+function makePaperMaterial(key) {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vPUv;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvPUv = uv;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vPUv;\n' + NOISE2)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // 종이 결: 아주 옅은 구름 무늬 + 1mm 안팎 섬유
+        vec2 mm = vPUv * vec2(210.0, 297.0);
+        float cloud = fb2(mm * 0.035 + 3.0), fib = vn2(mm * 1.3);
+        diffuseColor.rgb *= vec3(0.955, 0.958, 0.95) * (0.985 + 0.022 * cloud + 0.01 * fib);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        { float h = vn2(mm * 1.3) * 0.6 + vn2(mm * 4.1 + 7.0) * 0.4; vec2 dH = vec2(dFdx(h), dFdy(h)) * 0.0022; normal = perturbW(-vViewPosition, normal, dH, faceDirection); }`);
+  };
+  m.customProgramCacheKey = () => 'cg-paper-1';
+  return m;
+}
+
+class PaperWall extends WallBase {
+  constructor(def, ctx) {
+    super(def, ctx);
+    // 멀찍이 뒤: 처음 벽과 같은 칠한 시멘트 벽
+    this.basePlane(S_PAINT, { bump: 0.8, z: -0.85 });
+    this.base.scale.set(1.7, 1.5, 1);
+    this.stopDepth = -0.05;            // 종이를 뚫고 5cm 더 나감
+    this.Z = -this.D;
+    this.top = A4.y + A4.h / 2; this.bot = A4.y - A4.h / 2;
+    // 얇은 종이가 제 그림자에 덮여 잿빛이 되지 않게 빛을 등진 면만 그림자에 넣음(팔·주먹 그림자는 그대로 받음)
+    this.sheetMat = makePaperMaterial(); this.sheetMat.shadowSide = THREE.BackSide;
+    this.halfMat = makePaperMaterial(); this.halfMat.shadowSide = THREE.FrontSide;
+    this.buildStand();
+    this.sheet = this.makeSheet();
+    this.halves = []; this.shreds = [];
+    this.state = 'intact'; this.t = 0; this.fade = 1; this.fadeOut = null;
+    this.prevZ = { L: null, R: null };
+    this.onTear = null;
+    this.autoRenew = false;            // 다 끝난 뒤(자유롭게 칠 때)는 찢고 나면 새 종이를 끼움
+    this.renewAfter = 1.7;
+  }
+  // 피가 튀면 뒤쪽 벽에 묻음
+  surfaceZ() { return -this.D - 0.85; }
+
+  // 받침대: 양옆 기둥 + 위아래 가로대 + 검은 더블클립 네 개
+  buildStand() {
+    const Z = this.Z, top = this.top, bot = this.bot;
+    const steel = new THREE.MeshStandardMaterial({ color: 0x5d636a, roughness: 0.42, metalness: 0.85 });
+    const bar = new THREE.MeshStandardMaterial({ color: 0xa9afb5, roughness: 0.3, metalness: 1.0 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x18191b, roughness: 0.32, metalness: 0.55 });
+    const wire = new THREE.MeshStandardMaterial({ color: 0xd2d5d8, roughness: 0.22, metalness: 1.0 });
+    const PX = 0.182, rodT = top + 0.019, rodB = bot - 0.019;
+    const add = (m) => { m.castShadow = true; m.receiveShadow = true; this.add(m); return m; };
+    for (const sx of [-1, 1]) {
+      const post = add(new THREE.Mesh(new THREE.BoxGeometry(0.016, 1.0, 0.016), steel));
+      post.position.set(sx * PX, rodT + 0.035 - 0.5, Z - 0.004);
+      const cap = add(new THREE.Mesh(new THREE.BoxGeometry(0.019, 0.004, 0.019), steel));
+      cap.position.set(sx * PX, rodT + 0.037, Z - 0.004);
+      for (const y of [rodT, rodB]) {
+        const col = add(new THREE.Mesh(new THREE.CylinderGeometry(0.0085, 0.0085, 0.02, 14), steel));
+        col.rotation.z = Math.PI / 2; col.position.set(sx * (PX - 0.016), y, Z);
+      }
+    }
+    for (const y of [rodT, rodB]) {
+      const rod = add(new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 2 * PX, 16), bar));
+      rod.rotation.z = Math.PI / 2; rod.position.set(0, y, Z);
+    }
+    // 더블클립: 종이 끝을 무는 검은 삼각 몸통 + 가로대에 걸린 은색 손잡이 두 개
+    const prof = new THREE.Shape();
+    prof.moveTo(-0.0006, -0.0125); prof.lineTo(0.0006, -0.0125); prof.lineTo(0.0052, 0.0015); prof.quadraticCurveTo(0, 0.0045, -0.0052, 0.0015); prof.closePath();
+    const bodyG = new THREE.ExtrudeGeometry(prof, { depth: 0.025, bevelEnabled: true, bevelThickness: 0.0006, bevelSize: 0.0005, bevelSegments: 1, curveSegments: 6 });
+    bodyG.translate(0, 0, -0.0125); bodyG.rotateY(Math.PI / 2);   // 단면 (z, y) → 폭은 x
+    const loop = (h) => {
+      const p = new THREE.CurvePath();
+      const L = 0.0085;
+      p.add(new THREE.LineCurve3(new THREE.Vector3(-L, 0, 0), new THREE.Vector3(-L, h, 0)));
+      p.add(new THREE.LineCurve3(new THREE.Vector3(-L, h, 0), new THREE.Vector3(L, h, 0)));
+      p.add(new THREE.LineCurve3(new THREE.Vector3(L, h, 0), new THREE.Vector3(L, 0, 0)));
+      return new THREE.TubeGeometry(p, 24, 0.0008, 5, false);
+    };
+    for (const [edge, rodY, flip] of [[top, rodT, 1], [bot, rodB, -1]]) {
+      for (const cx of [-0.062, 0.062]) {
+        const clip = new THREE.Group();
+        const body = new THREE.Mesh(bodyG, black); body.castShadow = true; body.receiveShadow = true;
+        clip.add(body);
+        // 손잡이: 몸통 양 모서리에서 올라가 가로대를 감쌈
+        const hgt = Math.abs(rodY - edge) + 0.0055;
+        for (const sz of [-1, 1]) {
+          const w = new THREE.Mesh(loop(hgt), wire);
+          w.position.set(0, 0.0012, sz * 0.0046); w.rotation.x = -sz * 0.2;
+          w.castShadow = true; clip.add(w);
+        }
+        clip.position.set(cx, edge, Z);
+        if (flip < 0) clip.scale.y = -1;
+        this.add(clip);
+      }
+    }
+  }
+  // 찢기 전 한 장: 위아래가 물려 팽팽하되 가장자리가 살짝 휨
+  makeSheet() {
+    const g = new THREE.PlaneGeometry(A4.w, A4.h, 24, 34);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), u = x / (A4.w / 2), v = y / (A4.h / 2);
+      const bow = 0.0022 * (1 - v * v) + 0.0014 * Math.pow(Math.abs(u), 3) * (1 - v * v * 0.7);
+      p.setXYZ(i, A4.x + x, A4.y + y, this.Z - bow);
+    }
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, this.sheetMat);
+    m.castShadow = true; m.receiveShadow = true;
+    this.add(m);
+    return m;
+  }
+  // 주먹 앞면(월드)
+  _front(arm) {
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(arm.root.quaternion);
+    return arm.root.position.clone().addScaledVector(f, arm.reach());
+  }
+  impact() { return {}; }
+
+  // 주먹 자리(hx, hy)에서 가로로 찢어짐. big: 철권처럼 큰 덩어리
+  tear(hx, hy, side, big = false) {
+    if (this.state !== 'intact') return false;
+    this.state = 'torn'; this.t = 0;
+    const NC = 56, x0 = A4.x - A4.w / 2, dx = A4.w / NC;
+    hx = clamp(hx, x0 + 0.03, x0 + A4.w - 0.03);
+    hy = clamp(hy, this.bot + 0.07, this.top - 0.07);
+    // 찢어진 금: 주먹 자리에서 양옆으로 비뚤배뚤 번져 나감
+    const slope = rnd(-0.17, 0.17), ys = new Float32Array(NC + 1);
+    const ic = Math.round((hx - x0) / dx);
+    ys[ic] = hy;
+    for (const dir of [1, -1]) {
+      let y = hy;
+      for (let i = ic + dir; i >= 0 && i <= NC; i += dir) {
+        y += slope * dx + gauss() * 0.0011 + (Math.random() < 0.1 ? rnd(-0.004, 0.004) : 0);
+        y = clamp(y, this.bot + 0.04, this.top - 0.04);
+        ys[i] = y;
+      }
+    }
+    // 주먹이 뚫고 나간 구멍(가장자리는 너덜너덜)
+    const hr = big ? 0.033 : 0.027, h0 = big ? 0.015 : 0.012;
+    const yu = new Float32Array(NC + 1), yl = new Float32Array(NC + 1);
+    for (let i = 0; i <= NC; i++) {
+      const u = (x0 + i * dx - hx) / hr;
+      const hole = Math.abs(u) < 1 ? h0 * Math.sqrt(1 - u * u) * rnd(0.7, 1.25) : 0;
+      yu[i] = ys[i] + hole; yl[i] = ys[i] - hole * rnd(0.75, 1.0);
+    }
+    this.sheet.visible = false;
+    this.halves = [this._half(true, yu, hx, x0, dx, NC), this._half(false, yl, hx, x0, dx, NC)];
+    for (const h of this.halves) this._poseHalf(h, 0);
+    // 구멍에서 떨어져 나간 종잇조각
+    for (let i = 0; i < 9; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random());
+      this._shred(hx + Math.cos(a) * hr * 0.8 * r, hy + Math.sin(a) * h0 * r, a);
+    }
+    this.ctx.sfx?.paperTear?.(side, big);
+    if (this.onTear) this.onTear({ x: hx, y: hy, side });
+    return true;
+  }
+  _half(upper, edge, hx, x0, dx, NC) {
+    const NR = 18, yc = upper ? this.top : this.bot;
+    const n = (NC + 1) * (NR + 1);
+    const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2), d = new Float32Array(n), idx = [];
+    const cols = [];
+    for (let i = 0; i <= NC; i++) {
+      const x = x0 + i * dx, L = Math.abs(yc - edge[i]);
+      for (let j = 0; j <= NR; j++) {
+        const dj = j <= 2 ? Math.min(L, 0.008 * j / 2) : 0.008 + (L - 0.008) * (j - 2) / (NR - 2);
+        const k = i * (NR + 1) + j, y = upper ? yc - dj : yc + dj;
+        d[k] = dj;
+        pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = this.Z;
+        uv[k * 2] = i / NC; uv[k * 2 + 1] = (y - this.bot) / A4.h;
+      }
+      cols.push({ L, w: Math.exp(-Math.pow((x - hx) / 0.055, 2)), n: Math.random() });
+    }
+    // 두 장 다 앞면(반시계)이 카메라 반대쪽을 보게 감음 — 그림자는 빛을 등진 앞면만
+    for (let i = 0; i < NC; i++) for (let j = 0; j < NR; j++) {
+      const a = i * (NR + 1) + j, b = a + 1, c = a + NR + 1, e = c + 1;
+      if (upper) idx.push(a, c, b, b, c, e); else idx.push(a, b, c, b, e, c);
+    }
+    const g = new THREE.BufferGeometry();
+    const pa = new THREE.BufferAttribute(pos, 3); pa.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('position', pa); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
+    const mesh = new THREE.Mesh(g, this.halfMat);
+    mesh.castShadow = true; mesh.receiveShadow = true; mesh.frustumCulled = false;
+    this.add(mesh);
+    // 위쪽: 집게에 매달린 채 뒤로 밀렸다 흔들리며 돌아옴. 아래쪽: 집게 위로 서 있지 못하고 뒤로 꺾여 늘어짐
+    const dyn = upper
+      ? { A: 0, Av: 7.8, At: 0.08, wA: 9.0, zA: 0.42, K: 10, Kv: 0, Kt: 1.4, wK: 12, zK: 0.5, C: 1.2, Cv: 0, Ct: 0.45, wC: 11, zC: 0.4 }
+      : { A: 0, Av: 6.8, At: 1.3, wA: 6.2, zA: 0.34, K: 2, Kv: 26, Kt: 10.5, wK: 7.5, zK: 0.4, C: 0.7, Cv: 0, Ct: 0.35, wC: 10, zC: 0.4 };
+    return Object.assign({ mesh, g, pos, d, cols, upper, yc, NC, NR, flut: 1 }, dyn);
+  }
+  _stepHalf(h, dt) {
+    const n = Math.max(1, Math.ceil(dt / 0.004)), s = dt / n;
+    for (let i = 0; i < n; i++) {
+      h.Av += (h.wA * h.wA * (h.At - h.A) - 2 * h.zA * h.wA * h.Av) * s; h.A += h.Av * s;
+      h.Kv += (h.wK * h.wK * (h.Kt - h.K) - 2 * h.zK * h.wK * h.Kv) * s; h.K += h.Kv * s;
+      h.Cv += (h.wC * h.wC * (h.Ct - h.C) - 2 * h.zC * h.wC * h.Cv) * s; h.C += h.Cv * s;
+    }
+  }
+  _poseHalf(h, t) {
+    const P = h.pos, NR = h.NR, sgn = h.upper ? -1 : 1;
+    // 종이는 늘어나지 않아 가로로는 완만하게만 달라짐(천처럼 주름지지 않게): 주먹 쪽이 조금 더 밀리고, 펄럭임은 긴 물결 하나
+    const fl = h.flut * Math.exp(-t / 0.7);
+    const nc = h.NC;
+    for (let i = 0; i <= nc; i++) {
+      const c = h.cols[i], near = c.w, u = i / nc;
+      const wave = fl * 0.07 * Math.sin(t * 13 + u * 2.4 + (h.upper ? 0 : 1.7));
+      const A = h.A * (h.upper ? 0.78 + 0.42 * near : 0.9 + 0.18 * near) + wave;
+      const K = h.K * (h.upper ? 0.6 + 0.6 * near : 0.85 + 0.25 * near);
+      const C = h.C * (0.55 + 0.45 * near);
+      let y = h.yc, z = this.Z, dPrev = 0;
+      for (let j = 0; j <= NR; j++) {
+        const k = i * (NR + 1) + j, dj = h.d[k];
+        if (j > 0) {
+          const dm = (dj + dPrev) * 0.5, s = dm - 0.008, step = dj - dPrev;
+          if (s > 0) {
+            const th = A * Math.min(1, s / 0.012) + K * s + C * smoothstep(c.L - 0.03, c.L, dm);
+            y += sgn * Math.cos(th) * step; z -= Math.sin(th) * step;
+          } else y += sgn * step;
+        }
+        P[k * 3 + 1] = y; P[k * 3 + 2] = z;
+        dPrev = dj;
+      }
+    }
+    h.g.attributes.position.needsUpdate = true;
+    h.g.computeVertexNormals();
+  }
+  _shred(x, y, a) {
+    const s = rnd(0.0035, 0.008);
+    const g = new THREE.BufferGeometry();
+    const pts = [];
+    const nv = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < nv; i++) { const t = (i / nv) * Math.PI * 2 + rnd(-0.4, 0.4), r = s * rnd(0.5, 1.1); pts.push(Math.cos(t) * r, Math.sin(t) * r, 0); }
+    const pos = [0, 0, 0, ...pts], idx = [], uv = [0.5, 0.5];
+    for (let i = 0; i < nv; i++) { idx.push(0, 1 + i, 1 + (i + 1) % nv); uv.push(0.5 + pts[i * 3] * 20, 0.5 + pts[i * 3 + 1] * 20); }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, this.halfMat);
+    m.position.set(x, y, this.Z - 0.004);
+    m.rotation.set(rnd(-0.5, 0.5), rnd(-0.5, 0.5), rnd(0, 6.28));
+    m.castShadow = true;
+    this.add(m);
+    this.shreds.push({ m, g, v: new THREE.Vector3(Math.cos(a) * rnd(0.15, 0.7), Math.sin(a) * rnd(0.1, 0.6) + rnd(0.1, 0.5), -rnd(0.5, 2.3)), w: new THREE.Vector3(rnd(-14, 14), rnd(-14, 14), rnd(-10, 10)), t: 0, ph: Math.random() * 6 });
+  }
+  // 새 종이로 갈아 끼움: 찢긴 두 장은 사라지고 새 한 장이 들어옴
+  renew() {
+    if (this.state === 'intact') return;   // 이미 새 종이(끼우는 중 포함)
+    this.fadeOut = (this.fadeOut || []).concat(this.halves);
+    this.halves = [];
+    this.fadeOutT = 0;
+    this.halfMat.transparent = true;
+    this.sheet.visible = true; this.state = 'intact'; this.fade = 0;
+    this.sheetMat.transparent = true; this.sheetMat.opacity = 0;
+    this.prevZ.L = this.prevZ.R = null;
+    this.ctx.sfx?.play?.('paperSet', 0.42, { jitter: 0.06, verbAmt: 0.3 });
+  }
+  update(dt, time, arms, fists) {
+    this.t += dt;
+    // 주먹이 종이 면을 앞에서 뒤로 지나가는 순간 찢어짐(마지막 프레임까지 기다리지 않음)
+    if (this.state === 'intact' && arms) {
+      for (const s of ['L', 'R']) {
+        const a = arms[s];
+        if (!a) continue;
+        const f = this._front(a);
+        const prev = this.prevZ[s];
+        this.prevZ[s] = f.z;
+        if (prev === null || this.fade < 1) continue;
+        const inside = Math.abs(f.x - A4.x) < A4.w / 2 + 0.012 && f.y > this.bot - 0.01 && f.y < this.top + 0.01;
+        if (inside && prev > this.Z && f.z <= this.Z) { this.tear(f.x, f.y, s, !!(a.scrap && a.scrap.lumpHP > 0)); break; }
+      }
+    }
+    for (const h of this.halves) { this._stepHalf(h, dt); this._poseHalf(h, this.t); }
+    // 갈아 끼우는 중: 찢긴 종이는 흐려지고 새 종이가 선명해짐
+    if (this.fadeOut) {
+      this.fadeOutT += dt / 0.22;
+      this.halfMat.opacity = Math.max(0, 1 - this.fadeOutT);
+      if (this.fadeOutT >= 1) {
+        for (const h of this.fadeOut) { h.mesh.parent && h.mesh.parent.remove(h.mesh); h.g.dispose(); }
+        this.fadeOut = null; this.halfMat.opacity = 1; this.halfMat.transparent = false;
+      }
+    }
+    if (this.fade < 1) {
+      this.fade = Math.min(1, this.fade + dt / 0.28);
+      this.sheetMat.opacity = this.fade;
+      if (this.fade >= 1) this.sheetMat.transparent = false;
+    }
+    // 종잇조각: 뒤로 날아가 팔랑이며 떨어짐
+    for (const s of this.shreds) {
+      s.t += dt;
+      s.v.y -= 2.6 * dt; s.v.multiplyScalar(Math.exp(-dt * 2.4));
+      s.m.position.addScaledVector(s.v, dt);
+      s.m.position.x += Math.sin(s.t * 9 + s.ph) * 0.03 * dt;
+      s.m.rotation.x += s.w.x * dt; s.m.rotation.y += s.w.y * dt; s.m.rotation.z += s.w.z * dt;
+    }
+    this.shreds = this.shreds.filter((s) => {
+      if (s.t < 3.2 && s.m.position.y > -0.95) return true;
+      s.m.parent && s.m.parent.remove(s.m); s.g.dispose(); return false;
+    });
+    // 다 끝난 뒤: 주먹이 빠지고 잠시 뒤 새 종이
+    if (this.autoRenew && this.state === 'torn' && this.t > this.renewAfter && arms) {
+      const clear = ['L', 'R'].every((s) => !arms[s] || this._front(arms[s]).z > this.Z + 0.06);
+      if (clear) this.renew();
+    }
+  }
+}
+
 // ------------------------------------------------------------------ 유틸
 function mergeGeos(gs) {
   let pos = [], nrm = [], idx = [], off = 0;
@@ -978,7 +1294,7 @@ function mergeGeos(gs) {
 }
 export { mergeGeos, rockGeo };
 
-const CLASSES = { cement: CementWall, gravel: GravelWall, glass: GlassWall, nails: NailWall, freezer: FreezerWall, hotplate: HotPlateWall, electric: ElectricWall, spikes: SpikeWall };
+const CLASSES = { cement: CementWall, gravel: GravelWall, glass: GlassWall, nails: NailWall, freezer: FreezerWall, hotplate: HotPlateWall, electric: ElectricWall, spikes: SpikeWall, paper: PaperWall };
 
 export function createWall(id, ctx) {
   const def = WALLS.find((w) => w.id === id) || WALLS[0];

@@ -213,8 +213,12 @@ function wireTendril(rng, angle, len, turns) {
   return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 150, 0.00105, 5, false);
 }
 
+// 철권을 붙이는 기준 자리(손목). 살이 더 짧아졌으면 철권 전체를 지금 그루터기 끝으로 옮겨 붙인다
+const MOUNT_Z = 0.004;
+
 export class Scrap {
-  constructor(arm, seed, kind = 'base') {
+  // opts.fill: 그루터기부터 원래 손목까지 쇠파이프로 메운 예전 모양(가시벽에 꿰인 남의 철권 장식용)
+  constructor(arm, seed, kind = 'base', opts = {}) {
     if (!CACHE) CACHE = buildCache();
     this.arm = arm;
     const rng = this.rng = mulberry(Math.floor(seed));
@@ -224,9 +228,11 @@ export class Scrap {
     const requestedPreview = new URLSearchParams(location.search).get('scrapPreview');
     const previewKind = SCRAP_KINDS.includes(requestedPreview) ? requestedPreview : SCRAP_KINDS.includes(kind) ? kind : 'base';
     this.kind = this.previewKind = previewKind;
-    // 붙이는 자리: 그루터기 끝(cutZ) → 원래 손목(0.004)까지는 쇠팔뚝으로 메운다.
-    // 살이 얼마나 짧아졌든 철권의 타격면은 원래 길이에 남아 화면 밖으로 빠지지 않는다.
-    const stumpZ = Math.min(arm.cutZ, 0.006);
+    // 철권은 늘 손목 자리에 붙이는 크기로 만든다. 갈려서 짧아진 팔뚝을 쇠로 새로 메우지 않고
+    // 철권째 그루터기 끝으로 옮겨 붙이며, 팔이 그만큼 앞으로 나와 주먹 자리는 그대로 보인다(arm.reach·restShift).
+    this.fill = !!opts.fill;
+    this.mountZ = this.fill ? Math.min(arm.cutZ, 0.006) : MOUNT_Z;
+    const stumpZ = this.mountZ;
     const wristZ = 0.004;
     const pipeLen = wristZ - stumpZ + 0.02;
     const fullPipeHP = stumpZ < -0.012 ? 30 + pipeLen * 140 : 0;
@@ -645,6 +651,44 @@ export class Scrap {
     else if (previewKind === 'cutlery') this.glow.scale.set(0.48, 0.34, 0.85);
     else this.glow.scale.set(0.95, 0.8, 1.05);
     lump.add(this.glow);
+    this._syncMount();
+    // 타격면: 처음 덩어리의 맨 앞(부품이 앞에서부터 떨어져 나가면 그만큼 뒤로 물러남)
+    this.front0 = this.frontNow = this._frontZ();
+  }
+  // 남은 부품 중 가장 앞(벽 쪽) 끝 — 덩어리 기준 z
+  _frontZ() {
+    const L = this.lump;
+    if (!L || !this.parts.length) return this.front0 || 0;
+    L.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(L.matrixWorld).invert(), m = new THREE.Matrix4(), v = new THREE.Vector3();
+    let z = -Infinity;
+    for (const p of this.parts) p.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const b = o.geometry.boundingBox;
+      m.multiplyMatrices(inv, o.matrixWorld);
+      for (let i = 0; i < 8; i++) {
+        v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(m);
+        if (v.z > z) z = v.z;
+      }
+    });
+    return z === -Infinity ? (this.front0 || 0) : z;
+  }
+  // 앞쪽 부품이 떨어져 나가 타격면이 뒤로 물러난 거리 — 남은 고철이 실제로 벽에 닿게
+  get frontLoss() { return Math.max(0, Math.min(0.06, (this.front0 || 0) - (this.frontNow || 0))); }
+  // 지금 그루터기 끝이 붙인 기준 자리보다 얼마나 뒤(팔꿈치 쪽)에 있는지. 철권 전체가 그만큼 따라 들어감
+  get mountShift() { return this.fill ? 0 : Math.min(this.arm.cutZ, MOUNT_Z) - this.mountZ; }
+  _syncMount() { this.group.position.z = this.mountShift; }
+  // 덩어리가 다 떨어지면 남은 뼈대·테이프·쇠막대도 같이 떨어져 나가 그루터기만 남음(허공에 묶음만 떠 있지 않게)
+  shed(fx) {
+    const loose = [];
+    if (this.lump) for (const o of this.lump.children) if (o !== this.glow) loose.push(o);
+    for (const o of this.group.children) if (o !== this.lump) loose.push(o);
+    for (const o of loose) {
+      if (fx && fx.flyScrapPart) fx.flyScrapPart(o, false);
+      else if (o.parent) o.parent.remove(o);
+    }
+    this.pipe = null; this.pipeInner = null; this.wraps = [];
   }
   // 맞을 때 부품이 떨어져 나감. 떨어진 개수 반환
   onDamage(hit, fx, wall, contact) {
@@ -664,6 +708,7 @@ export class Scrap {
         fx.flyScrapPart(p, embed);
         n++;
       }
+      if (n && this.parts.length) this.frontNow = this._frontZ();
       // 테이프·철사도 하나씩 풀림
       const wl = Math.floor(this.wraps.length * (1 - st.lumpHP / this.totalLump));
       while (this.wraps.length && this.wraps.length > (5 - wl)) { const w = this.wraps.pop(); w.parent && w.parent.remove(w); }
@@ -679,6 +724,7 @@ export class Scrap {
           arm.traps.splice(arm.traps.indexOf(tr), 1);
           if (fx.dropObject) fx.dropObject(tr.obj, arm); else this.lump.remove(tr.obj);
         }
+        if (!this.fill) { n += 1; this.shed(fx); }
       }
     } else if (hit === 'pipe' && this.pipe) {
       const k = Math.max(0.05, st.pipeHP / (this.pipeHP0 || (this.pipeHP0 = st.pipeHP + 1)));
@@ -689,6 +735,7 @@ export class Scrap {
     return n;
   }
   update(dt, time) {
+    this._syncMount();
     if (this.lump) this.lump.rotation.z = Math.sin(time * 13) * 0.004;
     this.heat = Math.max(0, this.heat - dt * 0.12);
     this.glow.material.uniforms.opacity.value = Math.min(0.55, this.heat * 0.6) * (0.85 + Math.sin(time * 9) * 0.15);

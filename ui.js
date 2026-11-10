@@ -18,6 +18,7 @@ const SWATCH = {
   hotplate: 'radial-gradient(circle,#ffb347 0 15%,#ff5a1f 35%,#5a5a5c 70%)',
   electric: 'repeating-linear-gradient(45deg,#9aa3ab 0 2px,transparent 2px 9px),repeating-linear-gradient(-45deg,#9aa3ab 0 2px,#d7dade 2px 9px)',
   spikes: 'radial-gradient(circle at 50% 50%,#5b4636 0 22%,transparent 23%),#9c948a',
+  paper: 'linear-gradient(180deg,#7d848b 0 8%,#fbfbf8 8% 92%,#7d848b 92%)',
 };
 
 export class UI {
@@ -26,6 +27,7 @@ export class UI {
     this.el = {
       title: $('#title'), hud: $('#hud'), endure: $('#endureBox'), fill: $('#endureFill'), wallName: $('#wallName'),
       wallMenu: $('#playWallMenu'), playWalls: $('#playWalls'),
+      handBtn: $('#handBtn'), handMenu: $('#handMenu'), ending: $('#ending'),
       hint: $('#hint'), shop: $('#shop'), sound: $('#sound'),
     };
     this._fillK = -1;
@@ -59,6 +61,26 @@ export class UI {
       e.stopPropagation();
       if (e.target === this.el.wallMenu) this.closePlayWalls();
     });
+    // 다 끝난 뒤: 손 바꾸기
+    this.el.handBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.handBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.el.handMenu.classList.contains('show')) this.closeHands();
+      else this.openHands();
+    });
+    this.el.handMenu.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.handMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const b = e.target.closest('button[data-kind]');
+      if (b) {
+        if (this.A.equip(b.closest('[data-side]').dataset.side, b.dataset.kind)) this.closeHands();
+        return;
+      }
+      if (e.target === this.el.handMenu) this.closeHands();
+    });
+    // 끝 화면
+    $('#btnFree').addEventListener('click', () => this.A.free());
+    $('#btnRestart').addEventListener('click', () => { if (confirm('처음부터 다시?')) this.A.newGame(); });
     this.syncSound();
     $('#ctrlHint').textContent = touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J / 마우스 좌·우 · 짧게: 타격 · 길게: 모아치기';
   }
@@ -91,9 +113,49 @@ export class UI {
     this.el.wallName.disabled = !on;
     const w = this.WALLS.find((x) => x.id === this.G.wall);
     this.el.wallName.textContent = w ? w.name : '';
-    if (!on) this.closePlayWalls();
+    // 다 끝난 뒤엔 참을성 막대 대신 손 바꾸기. A4 앞에서는 채울 막대가 없어 숨김
+    const free = this.A.isFree();
+    this.el.endure.hidden = free || this.G.wall === 'paper';
+    this.el.handBtn.hidden = !(free && on);
+    this.el.handBtn.disabled = !on;
+    if (!on) { this.closePlayWalls(); this.closeHands(); }
+  }
+  openHands() {
+    this.closePlayWalls();
+    for (const row of this.el.handMenu.querySelectorAll('[data-side]')) {
+      const s = row.dataset.side;
+      const st = row.querySelector('small');
+      if (st && s !== 'both') st.textContent = this.A.handState(s);
+    }
+    this.el.handMenu.classList.add('show');
+    this.el.handMenu.setAttribute('aria-hidden', 'false');
+    this.el.handBtn.setAttribute('aria-expanded', 'true');
+  }
+  closeHands() {
+    this.el.handMenu.classList.remove('show');
+    this.el.handMenu.setAttribute('aria-hidden', 'true');
+    this.el.handBtn.setAttribute('aria-expanded', 'false');
+  }
+  // 끝 화면
+  showEnding(st) {
+    $('#eRounds').textContent = fmt(st.rounds) + '판';
+    $('#eScrap').textContent = fmt(st.scrap) + '개';
+    $('#eEndure').textContent = fmt(st.endure);
+    clearTimeout(this._ht);
+    this.el.hint.classList.remove('show', 'top');
+    const e = this.el.ending;
+    e.inert = false;
+    e.setAttribute('aria-hidden', 'false');
+    e.classList.add('show');
+  }
+  hideEnding() {
+    const e = this.el.ending;
+    e.classList.remove('show');
+    e.inert = true;
+    e.setAttribute('aria-hidden', 'true');
   }
   openPlayWalls() {
+    this.closeHands();
     this.renderPlayWalls();
     this.el.wallMenu.classList.add('show');
     this.el.wallMenu.setAttribute('aria-hidden', 'false');
@@ -145,6 +207,8 @@ export class UI {
     const txt = {
       controls: touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J · 짧게: 타격 · 길게: 모아치기',
       pinned: '같은 쪽을 한 번 터치',
+      free: '벽 · 손은 위에서 마음대로 바꿀 수 있음',
+      freeHands: '새 손은 오른쪽 위 손 바꾸기에서',
     }[id];
     if (!txt) return;
     this.say(txt);
@@ -169,9 +233,9 @@ export class UI {
     if (w) {
       $('#openedSw').style.background = SWATCH[w.id];
       $('#openedSw').style.display = '';
-      $('#openedTitle').textContent = '새 벽';
+      $('#openedTitle').textContent = w.paper ? '마지막' : '새 벽';
       $('#openedName').textContent = w.name;
-      $('#openedNote').textContent = SKILL_OF[w.id]?.name ? `모아치기 · ${SKILL_OF[w.id].name}` : '';
+      $('#openedNote').textContent = w.paper ? '양손에 철권을 달고 시작' : SKILL_OF[w.id]?.name ? `모아치기 · ${SKILL_OF[w.id].name}` : '';
       op.hidden = false;
     } else if (round.fresh) {
       $('#openedSw').style.display = 'none';
@@ -201,6 +265,8 @@ export class UI {
     setBar($('#goalFill'), k, key !== this._shopKey);
     this._shopKey = key;
     $('#goal').classList.toggle('full', k >= 1);
+    // A4가 열린 뒤로는 채울 막대가 없음
+    $('#goal').hidden = g.kind === 'hands' && G.owned.includes('paper');
     // 팔마다 직접 철권을 장착한다(공짜)
     const arms = $('#sArms'); arms.innerHTML = '';
     for (const side of ['L', 'R']) {
@@ -222,7 +288,7 @@ export class UI {
     // 벽은 지금 고른 것만 먼저 보여 주고, 목록은 필요할 때 펼친다.
     const selected = this.WALLS.find((w) => w.id === G.wall);
     $('#sWallName').textContent = selected ? selected.name : '';
-    $('#sWallMult').textContent = selected ? `모아치기 · ${SKILL_OF[selected.id]?.name || ''}` : '';
+    $('#sWallMult').textContent = selected ? (selected.paper ? '양손에 철권을 달고 시작' : `모아치기 · ${SKILL_OF[selected.id]?.name || ''}`) : '';
     const next = A.nextWall ? A.nextWall() : null;
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
