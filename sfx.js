@@ -1074,10 +1074,13 @@ export class SFX {
     src.playbackRate.value = (opts.rate || 1) * (1 + (Math.random() - 0.5) * (opts.jitter ?? 0.12));
     const g = c.createGain(); g.gain.value = vol;
     src.connect(g);
+    const nodes = [src, g];
     let out = g;
-    if (opts.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, opts.pan)); g.connect(p); out = p; }
+    if (opts.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, opts.pan)); g.connect(p); out = p; nodes.push(p); }
     out.connect(opts.dry ? this.dry : this.master);
-    if (opts.verb !== false) { const s = c.createGain(); s.gain.value = opts.verbAmt ?? 1; g.connect(s); s.connect(this.verb); }
+    if (opts.verb !== false) { const s = c.createGain(); s.gain.value = opts.verbAmt ?? 1; g.connect(s); s.connect(this.verb); nodes.push(s); }
+    // 소리 자체가 끝난 뒤에만 개별 노드를 정리한다. 공용 리버브의 잔향은 그대로 남긴다.
+    src.onended = () => { for (const node of nodes) node.disconnect(); src.onended = null; };
     src.start(c.currentTime + (opts.delay || 0));
   }
   // 자동재생 제한 때문에 페이지 로드 순간이 아니라 첫 '시작' 입력과 정확히 맞춘다.

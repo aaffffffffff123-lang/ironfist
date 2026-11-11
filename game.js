@@ -98,7 +98,7 @@ const G = {
   decals: {}, stuck: {}, old: {},
   seenHints: {}, seenSkill: {},
 };
-// ?test=1 : 저장을 건드리지 않고 마지막(A4, 철권 장착)부터 시험
+// ?test=1 : 저장을 건드리지 않고 마지막(A4, 맨주먹)부터 시험
 const TEST = QS.get('test');
 let noSave = false;
 let assets, arms = {}, wall = null, fx, sfx, ui, skillFx = null;
@@ -895,6 +895,14 @@ function freshHands() {
   }
 }
 
+// 해금 후 재방문·이어하기에도 종이에는 항상 온전한 맨주먹만 사용한다.
+function ensurePaperHands() {
+  if (G.wall !== 'paper') return false;
+  if (!['L', 'R'].some((s) => arms[s].I > 0 || arms[s].scrapObj || arms[s].scrap)) return false;
+  freshHands();
+  return true;
+}
+
 // ------------------------------------------------------------------ 판
 function resetArmMotion(side) {
   const f = fists[side], a = arms[side];
@@ -988,6 +996,7 @@ function setWall(id) {
   if (wall) { fx.clearPowerImpact?.(); fx.persist(); wall.dispose(); }
   wall = createWall(id, { scene, renderer, fx, sfx, G, WALL_D, anat: ANAT, fists, lightPool, contactOf: (s) => poses(s, arms[s]).contact });
   G.wall = id;
+  if (id === 'paper' && arms.L && arms.R) ensurePaperHands();
   if (wall.def.paper) { wall.onTear = onPaperTorn; wall.autoRenew = !!G.cleared; }
   fx.bindWall(wall);
   // 모아치기 기술은 지금 벽을 따라감
@@ -1256,10 +1265,10 @@ async function boot() {
   resize();
   let hadSave = load();
   if (TEST) {
-    // 시험용: 저장은 그대로 두고, 벽을 다 연 채 A4 앞에서 양손 철권으로 시작(시험 때만 A4에 철권 허용)
+    // 시험용: 저장은 그대로 두고, 벽을 다 연 채 A4 앞에서 양손 맨주먹으로 시작
     noSave = true; hadSave = true;
     G.owned = WALLS.map((w) => w.id); G.wall = 'paper'; G.cleared = false; G.openedAt = G.endure;
-    G.arms = { L: { I: 0.5, scrap: { lump: 140, pipe: 0, seed: 11, kind: 'base' } }, R: { I: 0.5, scrap: { lump: 140, pipe: 0, seed: 23, kind: 'wire' } } };
+    G.arms = { L: { I: 0 }, R: { I: 0 } };
     G.seenHints = Object.assign({}, G.seenHints, { controls: true });
   }
   assets = await loadArmAssets();
@@ -1278,8 +1287,8 @@ async function boot() {
   setWall(G.owned.includes(G.wall) ? G.wall : 'cement');
   // 저장된 팔 상태 복원
   for (const s of ['L', 'R']) restoreArm(arms[s], G.arms[s]);
-  // 마지막 A4는 맨주먹: 예전 저장이 철권·다친 손인 채 A4 앞이면 새 맨손으로
-  if (!TEST && !G.cleared && G.wall === 'paper' && (arms.L.I > 0 || arms.R.I > 0 || arms.L.scrapObj || arms.R.scrapObj)) freshHands();
+  // 예전 저장의 철권·다친 손도 엔딩 여부와 무관하게 복구한다.
+  ensurePaperHands();
   warmup();
   ui = new UI({ G, WALLS, hadSave, actions });
   round = blankRound();
@@ -1397,8 +1406,7 @@ const actions = {
   },
   start() {
     sfx.unlock();
-    // 마지막 A4는 맨주먹으로 친다 — 예전 저장으로 철권·다친 손인 채 A4 앞에 와 있어도 새 맨손으로 바꿈
-    if (!TEST && !G.cleared && G.wall === 'paper' && (arms.L.I > 0 || arms.R.I > 0 || arms.L.scrapObj || arms.R.scrapObj)) { freshHands(); save(); }
+    if (ensurePaperHands()) save();
     // 다 끝난 뒤엔 장착 화면 없이 바로(손은 위에서 바꿈)
     if (!G.cleared && !actions.canStart()) {
       mode = 'shop';
@@ -1414,12 +1422,13 @@ const actions = {
     ui.endure(goal());
     render();
     ui.hidePanels(); ui.hud(true);
-    if (G.cleared) showHint('free');
+    if (G.cleared && G.wall !== 'paper') showHint('free');
     return true;
   },
   // 끝 화면 → 계속 치기
   free() {
     if (!G.cleared) return;
+    if (ensurePaperHands()) save();
     clearTimeout(endingTimer);
     ui.hideEnding();
     mode = 'play';
@@ -1428,7 +1437,7 @@ const actions = {
     if (wall && wall.def.paper) { wall.autoRenew = true; wall.renew(); }
     ui.endure(goal());
     ui.hidePanels(); ui.hud(true);
-    showHint('free');
+    if (G.wall !== 'paper') showHint('free');
     render();
   },
   isFree() { return !!G.cleared; },
@@ -1458,6 +1467,7 @@ const actions = {
   // 다 끝난 뒤: 손을 마음대로 — 'flesh' 새 맨손 / 'scrap' 철권(손이 멀쩡해도 떼고 닮, 철권이 있으면 갈아 끼움)
   equip(side, kind) {
     if (!G.cleared || mode !== 'play') return false;
+    if (G.wall === 'paper' && kind === 'scrap') return false;
     const sides = side === 'both' ? ['L', 'R'] : [side];
     sides.forEach((s, n) => {
       const a = arms[s], prevI = a.I;
@@ -1490,6 +1500,7 @@ const actions = {
   handState(s) { const a = arms[s]; if (a.scrap && a.scrap.lumpHP > 0) return '철권'; if (a.I < 0.5) return a.I < 0.004 ? '맨손' : '다친 손'; return '손 없음'; },
   // 철권은 공짜 — 박살나면 또 장착함
   scrap(side) {
+    if (G.wall === 'paper') return false;
     const a = arms[side];
     if (a.hasFist()) return false;
     if (a.I < SCRAP_STUMP_I) a.setStump(SCRAP_STUMP_I);
@@ -1504,7 +1515,7 @@ const actions = {
   },
   // A4 앞에서는 양손 맨주먹으로 시작(start 에서 새 맨손으로 맞춰 줌)
   canStart() {
-    if (!G.cleared && G.wall === 'paper') return arms.L.hasFist() && arms.R.hasFist();
+    if (G.wall === 'paper') return ['L', 'R'].every((s) => arms[s].I < 0.5 && !arms[s].scrapObj && !arms[s].scrap);
     return !arms.L.needsScrap() || !arms.R.needsScrap();
   },
   goal: () => goal(),

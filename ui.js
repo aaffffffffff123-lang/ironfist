@@ -116,11 +116,14 @@ export class UI {
     // 다 끝난 뒤엔 참을성 막대 대신 손 바꾸기. A4 앞에서는 채울 막대가 없어 숨김
     const free = this.A.isFree();
     this.el.endure.hidden = free || this.G.wall === 'paper';
-    this.el.handBtn.hidden = !(free && on);
-    this.el.handBtn.disabled = !on;
+    const canChangeHands = free && on && this.G.wall !== 'paper';
+    this.el.handBtn.hidden = !canChangeHands;
+    this.el.handBtn.disabled = !canChangeHands;
+    if (!canChangeHands) this.closeHands();
     if (!on) { this.closePlayWalls(); this.closeHands(); }
   }
   openHands() {
+    if (this.G.wall === 'paper') return;
     this.closePlayWalls();
     for (const row of this.el.handMenu.querySelectorAll('[data-side]')) {
       const s = row.dataset.side;
@@ -167,7 +170,7 @@ export class UI {
     const list = this.el.playWalls;
     list.innerHTML = '';
     for (const w of this.WALLS) {
-      if (w.paper || !this.G.owned.includes(w.id)) continue;
+      if (!this.G.owned.includes(w.id)) continue;
       const cur = this.G.wall === w.id;
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -288,13 +291,13 @@ export class UI {
     }
     // 벽은 지금 고른 것만 먼저 보여 주고, 목록은 필요할 때 펼친다.
     const selected = this.WALLS.find((w) => w.id === G.wall);
-    $('#wallPicker').hidden = !!selected?.paper;
+    $('#wallPicker').hidden = false;
     $('#sWallName').textContent = selected ? selected.name : '';
     $('#sWallMult').textContent = selected?.paper ? '맨주먹으로 시작' : '';
     const next = A.nextWall ? A.nextWall() : null;
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
-      if (w.paper) continue;
+      if (w.paper && !G.owned.includes(w.id)) continue;
       const owned = G.owned.includes(w.id), cur = G.wall === w.id;
       const isNext = !owned && next && next.id === w.id;
       const row = document.createElement('button');

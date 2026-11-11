@@ -287,6 +287,8 @@ class Rings {
 class Bolts {
   constructor(scene, maxSeg = 1600) {
     this.maxSeg = maxSeg; this.list = [];
+    this.freePools = [];
+    this.cam = V(); this.dir = V(); this.view = V(); this.perp = V();
     // 띠의 가로 위치(-1~1) — 빛띠는 가운데가 진하고 바깥으로 갈수록 흐려짐(납작한 띠로 안 보이게)
     const sideArr = new Float32Array(maxSeg * 6);
     for (let i = 0; i < maxSeg; i++) sideArr.set([-1, -1, 1, -1, 1, 1], i * 6);
@@ -305,7 +307,7 @@ class Bolts {
           float f = ${soft ? 'pow(max(1.0 - e, 0.0), 1.25)' : 'smoothstep(1.0, 0.55, e)'};
           float a = vC.a * f; if (a < 0.003) discard; gl_FragColor = vec4(vC.rgb, a); ${TONE} }`,
       }));
-      m.frustumCulled = false; m.renderOrder = order;
+      m.frustumCulled = false; m.renderOrder = order; m.visible = false;
       scene.add(m);
       return m;
     };
@@ -313,67 +315,91 @@ class Bolts {
     this.core = mk(THREE.AdditiveBlending, 9, false);
   }
   // 두 점 사이 지그재그 길 + 가지
-  path(a, b, rough = 0.22, branch = 0.35, depth = 0) {
-    const pts = [a.clone(), b.clone()];
+  point(pool) { const i = pool.vi++; return pool.v[i] || (pool.v[i] = V()); }
+  path(a, b, rough = 0.22, branch = 0.35, depth = 0, pool = { v: [], paths: [], mids: [[], [], []], out: [] }) {
+    if (depth === 0) { pool.vi = 0; pool.pi = 0; pool.out.length = 0; }
+    const pi = pool.pi++, pts = pool.paths[pi] || (pool.paths[pi] = []);
+    pts.length = 2; pts.branch = 0;
+    pts[0] = this.point(pool).copy(a); pts[1] = this.point(pool).copy(b);
+    pool.out.push(pts);
     const L = a.distanceTo(b);
     let disp = L * rough;
-    const dir = V().subVectors(b, a).normalize();
-    const side = V().crossVectors(dir, new THREE.Vector3(0, 0, 1));
+    const dir = this.point(pool).subVectors(b, a).normalize();
+    const side = this.point(pool).set(dir.y, -dir.x, 0);
     if (side.lengthSq() < 1e-6) side.set(1, 0, 0); else side.normalize();
-    const side2 = V().crossVectors(dir, side).normalize();
+    const side2 = this.point(pool).crossVectors(dir, side).normalize();
+    const mids = pool.mids[depth];
     for (let it = 0; it < 5; it++) {
-      const next = [pts[0]];
-      for (let i = 0; i < pts.length - 1; i++) {
-        const m = V().lerpVectors(pts[i], pts[i + 1], 0.5);
+      const n = pts.length;
+      for (let i = 0; i < n - 1; i++) {
+        const m = this.point(pool).lerpVectors(pts[i], pts[i + 1], 0.5);
         m.addScaledVector(side, (Math.random() - 0.5) * 2 * disp).addScaledVector(side2, (Math.random() - 0.5) * disp * 0.5);
-        next.push(m, pts[i + 1]);
+        mids[i] = m;
       }
-      pts.length = 0; pts.push(...next);
+      for (let i = n - 2; i >= 0; i--) { pts[i * 2 + 2] = pts[i + 1]; pts[i * 2 + 1] = mids[i]; }
       disp *= 0.52;
     }
-    const out = [pts];
     if (depth < 2) {
       const nb = Math.random() < branch ? 1 + Math.floor(Math.random() * (depth ? 1 : 3)) : 0;
       for (let k = 0; k < nb; k++) {
         const i = 3 + Math.floor(Math.random() * (pts.length - 6));
         const s = pts[i];
         const bl = L * rnd(0.25, 0.5) * (depth ? 0.6 : 1);
-        const bd = V().copy(dir).addScaledVector(side, rnd(-1.2, 1.2)).normalize();
-        const e = s.clone().addScaledVector(bd, bl);
-        const sub = this.path(s, e, rough * 1.1, branch * 0.5, depth + 1);
-        for (const sp of sub) { sp.branch = (depth + 1); out.push(sp); }
+        const bd = this.point(pool).copy(dir).addScaledVector(side, rnd(-1.2, 1.2)).normalize();
+        const e = this.point(pool).copy(s).addScaledVector(bd, bl);
+        const first = pool.out.length;
+        this.path(s, e, rough * 1.1, branch * 0.5, depth + 1, pool);
+        for (let j = first; j < pool.out.length; j++) pool.out[j].branch = depth + 1;
       }
     }
-    return out;
+    return pool.out;
   }
   // o: width, life, flick(재생성 간격), core[r,g,b], glow[r,g,b], ga(빛띠 불투명), delay
   add(a, b, o = {}) {
     const B = Object.assign({ a: a.clone(), b: b.clone(), t: 0, life: 0.1, width: 0.0016, flick: 0.035, ft: 0, rough: 0.22, branch: 0.35, core: [1.7, 1.9, 2.6], glow: [0.05, 0.17, 0.85], ga: 0.9, delay: 0, follow: null }, o);
-    B.paths = this.path(B.a, B.b, B.rough, B.branch);
+    B.pool = this.freePools.pop() || { v: [], paths: [], mids: [[], [], []], out: [] };
+    B.paths = this.path(B.a, B.b, B.rough, B.branch, 0, B.pool);
     this.list.push(B);
-    if (this.list.length > 40) this.list.shift();
+    if (this.list.length > 40) this.recycle(this.list.shift());
     return B;
   }
-  clear() { this.list.length = 0; this.glow.geometry.setDrawRange(0, 0); this.core.geometry.setDrawRange(0, 0); }
+  recycle(B) { if (this.freePools.length < 40) this.freePools.push(B.pool); }
+  clear() {
+    for (const B of this.list) this.recycle(B);
+    this.list.length = 0;
+    for (const mesh of [this.glow, this.core]) { mesh.visible = false; mesh.geometry.setDrawRange(0, 0); }
+  }
+  segment(mesh, s, p0, p1, pp, width, c, alpha) {
+    const pos = mesh.geometry.attributes.position.array, col = mesh.geometry.attributes.color.array;
+    const x = pp.x * width, y = pp.y * width, z = pp.z * width, o = s * 18;
+    pos[o] = p0.x - x; pos[o + 1] = p0.y - y; pos[o + 2] = p0.z - z;
+    pos[o + 3] = p1.x - x; pos[o + 4] = p1.y - y; pos[o + 5] = p1.z - z;
+    pos[o + 6] = p1.x + x; pos[o + 7] = p1.y + y; pos[o + 8] = p1.z + z;
+    pos[o + 9] = p0.x - x; pos[o + 10] = p0.y - y; pos[o + 11] = p0.z - z;
+    pos[o + 12] = p1.x + x; pos[o + 13] = p1.y + y; pos[o + 14] = p1.z + z;
+    pos[o + 15] = p0.x + x; pos[o + 16] = p0.y + y; pos[o + 17] = p0.z + z;
+    for (let q = 0; q < 6; q++) { const k = s * 24 + q * 4; col[k] = c[0]; col[k + 1] = c[1]; col[k + 2] = c[2]; col[k + 3] = alpha; }
+  }
   update(dt, camera) {
+    if (!this.list.length) return;
+    let alive = 0;
     for (const B of this.list) {
-      if (B.delay > 0) { B.delay -= dt; continue; }
+      if (B.delay > 0) { B.delay -= dt; this.list[alive++] = B; continue; }
       B.t += dt; B.ft += dt;
       if (B.follow) { const r = B.follow(); if (r) { B.a.copy(r[0]); B.b.copy(r[1]); } }
-      if (B.ft >= B.flick) { B.ft = 0; B.paths = this.path(B.a, B.b, B.rough, B.branch); }
+      if (B.ft >= B.flick) { B.ft = 0; B.paths = this.path(B.a, B.b, B.rough, B.branch, 0, B.pool); }
       B.fl = Math.random() < 0.25 ? 0.45 : 1;
+      if (B.t < B.life) this.list[alive++] = B; else this.recycle(B);
     }
-    this.list = this.list.filter((B) => B.t < B.life);
-    const cam = camera.getWorldPosition(V());
-    const fill = (mesh, wMul, useCore) => {
-      const pos = mesh.geometry.attributes.position.array, col = mesh.geometry.attributes.color.array;
-      let s = 0;
-      const d = V(), vd = V(), pp = V();
+    this.list.length = alive;
+    const cam = camera.getWorldPosition(this.cam), d = this.dir, vd = this.view, pp = this.perp;
+    let s = 0;
+    // 같은 번개의 방향·폭 계산을 한 번만 하고, 기존 빛띠와 중심선 양쪽에 쓴다.
+    fill:
       for (const B of this.list) {
         if (B.delay > 0) continue;
         const u = B.t / B.life;
         const I = Math.pow(1 - u, 0.7) * (B.fl ?? 1);
-        const c = useCore ? B.core : B.glow, al = useCore ? I : I * B.ga;
         for (const P of B.paths) {
           const bw = P.branch ? (P.branch === 1 ? 0.55 : 0.35) : 1;
           for (let i = 0; i < P.length - 1 && s < this.maxSeg; i++) {
@@ -383,26 +409,24 @@ class Bolts {
             pp.crossVectors(d, vd);
             if (pp.lengthSq() < 1e-12) continue;
             const taper = P.branch ? (1 - i / P.length) : 1;
-            pp.normalize().multiplyScalar(B.width * wMul * bw * (0.35 + 0.65 * taper));
-            const o = s * 18;
-            pos[o] = p0.x - pp.x; pos[o + 1] = p0.y - pp.y; pos[o + 2] = p0.z - pp.z;
-            pos[o + 3] = p1.x - pp.x; pos[o + 4] = p1.y - pp.y; pos[o + 5] = p1.z - pp.z;
-            pos[o + 6] = p1.x + pp.x; pos[o + 7] = p1.y + pp.y; pos[o + 8] = p1.z + pp.z;
-            pos[o + 9] = p0.x - pp.x; pos[o + 10] = p0.y - pp.y; pos[o + 11] = p0.z - pp.z;
-            pos[o + 12] = p1.x + pp.x; pos[o + 13] = p1.y + pp.y; pos[o + 14] = p1.z + pp.z;
-            pos[o + 15] = p0.x + pp.x; pos[o + 16] = p0.y + pp.y; pos[o + 17] = p0.z + pp.z;
-            const ca = al * (0.5 + 0.5 * taper);
-            for (let q = 0; q < 6; q++) { const k = s * 24 + q * 4; col[k] = c[0]; col[k + 1] = c[1]; col[k + 2] = c[2]; col[k + 3] = ca; }
+            pp.normalize();
+            const w = 0.35 + 0.65 * taper, a = 0.5 + 0.5 * taper;
+            this.segment(this.glow, s, p0, p1, pp, B.width * 4.2 * bw * w, B.glow, I * B.ga * a);
+            this.segment(this.core, s, p0, p1, pp, B.width * bw * w, B.core, I * a);
             s++;
+            if (s >= this.maxSeg) break fill;
           }
         }
       }
+    for (const mesh of [this.glow, this.core]) {
+      mesh.visible = s > 0;
       mesh.geometry.setDrawRange(0, s * 6);
-      mesh.geometry.attributes.position.needsUpdate = true;
-      mesh.geometry.attributes.color.needsUpdate = true;
-    };
-    fill(this.glow, 4.2, false);
-    fill(this.core, 1, true);
+      if (!s) continue;
+      for (const [name, size] of [['position', 18], ['color', 24]]) {
+        const attr = mesh.geometry.attributes[name];
+        attr.clearUpdateRanges(); attr.addUpdateRange(0, s * size); attr.needsUpdate = true;
+      }
+    }
   }
 }
 
@@ -647,22 +671,26 @@ class Ghosts {
     this.hist = { L: [], R: [] };
     this.on = { L: 0, R: 0 };
     this.mode = { L: 'trail', R: 'trail' };
+    this.savedMeshes = { L: [], R: [] };
+    this.originalPos = V(); this.originalQuat = new THREE.Quaternion();
   }
   record(side) {
     const r = this.arms[side].root, H = this.hist[side];
-    H.push({ p: r.position.clone(), q: r.quaternion.clone() });
-    if (H.length > 14) H.shift();
+    const h = H.length >= 14 ? H.shift() : { p: V(), q: new THREE.Quaternion() };
+    h.p.copy(r.position); h.q.copy(r.quaternion); H.push(h);
   }
   render(renderer, scene, camera) {
     if (this.on.L <= 0.01 && this.on.R <= 0.01) return;
     const bg = scene.background, sm = renderer.shadowMap.autoUpdate, mask = camera.layers.mask;
-    scene.background = null; renderer.shadowMap.autoUpdate = false;
-    const p0 = V(), q0 = new THREE.Quaternion();
-    for (const s of ['L', 'R']) {
+    const override = scene.overrideMaterial, autoMatrix = scene.matrixWorldAutoUpdate;
+    scene.background = null; scene.overrideMaterial = null; renderer.shadowMap.autoUpdate = false;
+    // 본 장면은 이미 갱신됨. 각 잔상의 팔만 갱신하고 나머지 장면의 행렬 계산은 반복하지 않는다.
+    scene.matrixWorldAutoUpdate = false;
+    const p0 = this.originalPos, q0 = this.originalQuat;
+    try { for (const s of ['L', 'R']) {
       const k = this.on[s];
       if (k <= 0.01) continue;
       const a = this.arms[s], H = this.hist[s], [l0, l1] = GHOST_LAYERS[s];
-      if (a.scrapObj) a.scrapObj.group.traverse((o) => { if (o.isMesh && o !== a.scrapObj.glow) o.layers.enable(l1); });
       p0.copy(a.root.position); q0.copy(a.root.quaternion);
       const picks = [];
       if (this.mode[s] === 'shimmer') {
@@ -675,15 +703,37 @@ class Ghosts {
           if (h && h.p.distanceTo(p0) > 0.012) picks.push({ p: h.p, q: h.q, a: al });
         }
       }
-      for (const pk of picks) {
-        a.root.position.copy(pk.p); a.root.quaternion.copy(pk.q); a.root.updateMatrixWorld(true);
-        scene.overrideMaterial = this.mats[s]; this.mats[s].opacity = pk.a * k;
-        camera.layers.set(l0); renderer.render(scene, camera);
-        if (a.scrapObj && a.scrap && a.scrap.lumpHP > 0) { scene.overrideMaterial = this.smat; this.smat.opacity = pk.a * k * 0.8; camera.layers.set(l1); renderer.render(scene, camera); }
+      if (!picks.length) continue;
+      const saved = this.savedMeshes[s]; let count = 0;
+      const swap = (mesh, material, order) => {
+        const item = saved[count] || (saved[count] = {}); count++;
+        item.mesh = mesh; item.material = mesh.material; item.order = mesh.renderOrder;
+        mesh.material = material; mesh.renderOrder = order;
+      };
+      try {
+        for (const mesh of [a.skin, a.upper]) swap(mesh, this.mats[s], 0);
+        const metal = !!(a.scrapObj && a.scrap && a.scrap.lumpHP > 0);
+        if (metal) a.scrapObj.group.traverse((o) => {
+          if (o.isMesh && o !== a.scrapObj.glow) { o.layers.enable(l1); swap(o, this.smat, 1); }
+        });
+        // 살 잔상 다음 쇠 잔상이라는 기존 순서를 유지하며 두 재질을 한 번에 그린다.
+        camera.layers.set(l0); if (metal) camera.layers.enable(l1);
+        for (const pk of picks) {
+          a.root.position.copy(pk.p); a.root.quaternion.copy(pk.q); a.root.updateMatrixWorld(true);
+          this.mats[s].opacity = pk.a * k; this.smat.opacity = pk.a * k * 0.8;
+          renderer.render(scene, camera);
+        }
+      } finally {
+        for (let i = 0; i < count; i++) {
+          const item = saved[i]; item.mesh.material = item.material; item.mesh.renderOrder = item.order;
+          item.mesh = null; item.material = null;
+        }
+        a.root.position.copy(p0); a.root.quaternion.copy(q0); a.root.updateMatrixWorld(true);
       }
-      a.root.position.copy(p0); a.root.quaternion.copy(q0); a.root.updateMatrixWorld(true);
+    } } finally {
+      scene.overrideMaterial = override; scene.matrixWorldAutoUpdate = autoMatrix;
+      camera.layers.mask = mask; scene.background = bg; renderer.shadowMap.autoUpdate = sm;
     }
-    scene.overrideMaterial = null; camera.layers.mask = mask; scene.background = bg; renderer.shadowMap.autoUpdate = sm;
   }
 }
 

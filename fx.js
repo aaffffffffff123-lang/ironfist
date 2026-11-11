@@ -313,8 +313,9 @@ class Puffs {
     this.max = max;
     const g = new THREE.BufferGeometry();
     this.pos = new Float32Array(max * 3); this.data = new Float32Array(max * 2); // size, alpha
-    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    g.setAttribute('aD', new THREE.BufferAttribute(this.data, 2));
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aD', new THREE.BufferAttribute(this.data, 2).setUsage(THREE.DynamicDrawUsage));
+    g.setDrawRange(0, 0);
     this.mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       uniforms: { uTex: { value: SPRITE }, uColor: { value: new THREE.Color(color) }, uScale: PUFF_SCALE },
@@ -326,31 +327,36 @@ class Puffs {
           #include <colorspace_fragment>
         }`,
     });
-    this.obj = new THREE.Points(g, this.mat); this.obj.frustumCulled = false; this.obj.renderOrder = 4;
+    this.obj = new THREE.Points(g, this.mat); this.obj.frustumCulled = false; this.obj.renderOrder = 4; this.obj.visible = false;
     this.p = []; this.baseSize = size; this.baseOpacity = opacity;
   }
   emit(o) { if (this.p.length >= this.max) this.p.shift(); this.p.push(Object.assign({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 1, t: 0, size: this.baseSize, grow: 1, g: 0, drag: 1, a: this.baseOpacity }, o)); }
   update(dt) {
     const n = this.p.length;
+    if (!n) { this.obj.visible = false; return; }
+    let alive = 0;
     for (let i = 0; i < n; i++) {
       const q = this.p[i]; q.t += dt;
       q.vy += q.g * dt; const dr = Math.pow(q.drag, dt);
       q.vx *= dr; q.vy *= dr; q.vz *= dr;
       q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
+      if (q.t < q.life) this.p[alive++] = q;
     }
-    this.p = this.p.filter((q) => q.t < q.life);
+    this.p.length = alive;
     const m = this.p.length;
-    for (let i = 0; i < this.max; i++) {
-      if (i < m) {
+    this.obj.visible = m > 0;
+    this.obj.geometry.setDrawRange(0, m);
+    if (!m) return;
+    for (let i = 0; i < m; i++) {
         const q = this.p[i]; const k = q.t / q.life;
         this.pos[i * 3] = q.x; this.pos[i * 3 + 1] = q.y; this.pos[i * 3 + 2] = q.z;
         this.data[i * 2] = q.size * (1 + (q.grow - 1) * k) * 900;
         // pop: 터지듯 바로 진하게 나타났다 사라짐(먼지·부스러기), 아니면 서서히 피었다 사라짐(연기·김)
         this.data[i * 2 + 1] = q.a * (q.pop ? Math.min(1, k / 0.05) * Math.pow(1 - k, 1.7) : Math.sin(Math.min(1, k * 1.0 + 0.05) * Math.PI) * (1 - k * 0.3));
-      } else { this.data[i * 2 + 1] = 0; this.data[i * 2] = 0; }
     }
-    this.obj.geometry.attributes.position.needsUpdate = true;
-    this.obj.geometry.attributes.aD.needsUpdate = true;
+    for (const [attr, count] of [[this.obj.geometry.attributes.position, m * 3], [this.obj.geometry.attributes.aD, m * 2]]) {
+      attr.clearUpdateRanges(); attr.addUpdateRange(0, count); attr.needsUpdate = true;
+    }
   }
 }
 
@@ -437,11 +443,14 @@ class Arcs {
     const n = this.max * this.seg * 6 * 2;
     const g = new THREE.BufferGeometry();
     this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3);
-    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setDrawRange(0, 0);
     this.obj = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-    this.obj.frustumCulled = false; this.obj.renderOrder = 6;
+    this.obj.frustumCulled = false; this.obj.renderOrder = 6; this.obj.visible = false;
     this.arcs = [];
+    this.points = Array.from({ length: this.seg + 1 }, () => new THREE.Vector3());
+    this.layers = [[3.5, [0.25, 0.45, 1.0]], [1, [0.95, 0.97, 1.0]]];
   }
   add(a, b, life = 0.12, width = 0.0016) { if (this.arcs.length >= this.max) this.arcs.shift(); this.arcs.push({ a: a.clone(), b: b.clone(), t: 0, life, width, seed: Math.random() * 100 }); }
   burst(c, n, D) {
@@ -456,37 +465,41 @@ class Arcs {
   }
   update(dt) {
     let k = 0;
-    const tmp = new THREE.Vector3(), prev = new THREE.Vector3();
-    for (const a of this.arcs) a.t += dt;
-    this.arcs = this.arcs.filter((a) => a.t < a.life);
-    const zero = () => { this.pos.fill(0); this.col.fill(0); };
-    zero();
+    let alive = 0;
+    for (const a of this.arcs) { a.t += dt; if (a.t < a.life) this.arcs[alive++] = a; }
+    this.arcs.length = alive;
+    this.obj.visible = alive > 0;
+    if (!alive) { this.obj.geometry.setDrawRange(0, 0); return; }
     for (const a of this.arcs) {
       const fl = Math.random() < 0.3 ? 0.4 : 1;
       const I = (1 - a.t / a.life) * fl;
-      const pts = [];
+      const pts = this.points;
       for (let i = 0; i <= this.seg; i++) {
         const t = i / this.seg;
+        const tmp = pts[i];
         tmp.lerpVectors(a.a, a.b, t);
         const j = Math.sin(t * Math.PI) * 0.018;
         tmp.x += (Math.random() - 0.5) * j; tmp.y += (Math.random() - 0.5) * j; tmp.z += (Math.random() - 0.5) * j * 0.4;
-        pts.push(tmp.clone());
       }
-      for (const [wmul, c] of [[3.5, [0.25, 0.45, 1.0]], [1, [0.95, 0.97, 1.0]]]) {
+      for (const [wmul, c] of this.layers) {
         for (let i = 0; i < this.seg; i++) {
           const p0 = pts[i], p1 = pts[i + 1];
           const w = a.width * wmul;
-          const pv = [p0.x - w, p0.y, p0.z, p1.x - w, p1.y, p1.z, p1.x + w, p1.y + w, p1.z, p0.x - w, p0.y, p0.z, p1.x + w, p1.y + w, p1.z, p0.x + w, p0.y + w, p0.z];
           for (let q = 0; q < 6; q++) {
-            if (k >= this.pos.length / 3) break;
-            this.pos[k * 3] = pv[q * 3]; this.pos[k * 3 + 1] = pv[q * 3 + 1]; this.pos[k * 3 + 2] = pv[q * 3 + 2];
+            const p = q === 0 || q === 3 || q === 5 ? p0 : p1;
+            const plus = q === 2 || q === 4 || q === 5;
+            this.pos[k * 3] = p.x + (plus ? w : -w);
+            this.pos[k * 3 + 1] = p.y + (plus ? w : 0);
+            this.pos[k * 3 + 2] = p.z;
             this.col[k * 3] = c[0] * I; this.col[k * 3 + 1] = c[1] * I; this.col[k * 3 + 2] = c[2] * I; k++;
           }
         }
       }
     }
-    this.obj.geometry.attributes.position.needsUpdate = true;
-    this.obj.geometry.attributes.color.needsUpdate = true;
+    this.obj.geometry.setDrawRange(0, k);
+    for (const attr of [this.obj.geometry.attributes.position, this.obj.geometry.attributes.color]) {
+      attr.clearUpdateRanges(); attr.addUpdateRange(0, k * 3); attr.needsUpdate = true;
+    }
   }
 }
 
