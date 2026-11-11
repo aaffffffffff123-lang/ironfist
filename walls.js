@@ -6,7 +6,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 // 벽 정의 — dmg: 살 손실(0~1 단위), scrapDmg: 고철 피해, mult: 참을성 배율, fear: 처음 열었을 때 대기 중 주먹 떨림
-// pace·space: 이 벽에서 살·고철이 닳는 빠르기. 어느 벽이든 맨손 한 판이 보통 속도로 2분 안팎, 고철 한 판이 1분 안팎이 되게 맞춤
+// pace·space: 벽별 걸림·감전까지 고려한 상대 소모 속도. 전체 판 길이는 game.js의 DAMAGE_PACE로 조절.
 export const WALLS = [
   { id: 'cement', name: '시멘트', mult: 1.0, dmg: 0.0115, scrapDmg: 8, pace: 0.44, space: 0.35, fear: 0.0, kind: {} },
   { id: 'gravel', name: '자갈', mult: 1.6, dmg: 0.0135, scrapDmg: 9, pace: 0.375, space: 0.3, fear: 0.15, kind: { abr: 0.45 } },

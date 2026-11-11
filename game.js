@@ -10,23 +10,22 @@ import { UI } from './ui.js';
 import { SkillFX, SKILL_OF, SKILLS, skillKind } from './skills.js';
 
 const WALL_D = 0.62;                 // 카메라 → 벽 거리
-const DAMAGE_PACE = 0.65;            // 한 판에서 손·고철이 박살나는 속도(벽마다 pace·space를 한 번 더 곱함)
+const DAMAGE_PACE = 1.95;            // 일반타 소모 속도 3배: 상처 단계는 유지하고 반복 타격 구간을 줄임
 // 참을성: 맞아서 아픈 걸 견딘 만큼 쌓임(벽 배율을 곱함). 다친 양이 아니라 견딘 대수가 기준이라
 // 모아치기로 손을 한 번에 날리면 견딘 대수가 줄어 덜 쌓인다.
 const E_PUNCH = 3;                   // 맨손 한 대
 const E_SCRAP = 1;                   // 고철 한 대(쇠는 안 아프고 철사 박힌 이음새만 울림)
 const E_AUTO = 0.6;                  // 감전·잔상으로 저절로 나간 한 대
 // 모아치기: 한 방에 보통 주먹 수십 대만큼 손이 망가짐 — 그 대수의 65%만 견딘 것으로 침.
-// 터뜨리면 판은 빨리 끝나도 참을성은 덜 쌓여 고철을 더 갈아 끼우게 됨
+// 맨손에서는 모은 대수의 일부만 셈. 철권 한 판으로 남은 목표를 채워 재장착 반복을 막는다.
 const CHARGE_KEEP = 0.65;
 const E_TUG = 1.5, E_RIP = 3;        // 박힌 손 버둥 한 번 / 뜯어냄(고철이면 1/3)
 const E_BLEED = 1.2;                 // 유리가 박혀 피가 새는 동안 초당
 const TKD_GAP = 0.33, TKD_BONUS = 0.06;   // 세 대를 이 간격(실제 초) 안에 번갈아 치면 그 세 대의 6% 더
-// 지금 가장 높은 벽을 연 뒤로 이만큼 쌓이면 다음 벽이 열림(시멘트→자갈, 자갈→소주병 …). 보통 속도로 맨손 한 판 + 고철 한 판쯤.
-// 벽마다 보통 속도 맨손 한 판 참을성의 1.1배 — 운이 나빠 덜 쌓인 판이어도 고철 한 판이면 채워짐. 넘친 건 다음 벽으로 안 넘어감
-// 마지막 A4 용지는 가시벽을 연 뒤로 새 손 주기만큼(맨손 한 판 + 고철 한 판쯤) 견디면 열림
-const OPEN_SPAN = [1530, 2410, 5480, 7930, 10010, 13430, 40960, 31040];
-const HANDS_SPAN = 31040;            // 벽이 다 열린 뒤로는 이만큼 쌓일 때마다 새 손
+// 빠른 일반타 기준 맨손 한 판 뒤 철권 한 판으로 다음 벽까지.
+// 골절·출혈·감전의 편차로 모자라는 몫은 철권이 닳는 동안 함께 채운다. 넘친 건 다음 벽으로 안 넘어감.
+const OPEN_SPAN = [1080, 1740, 3900, 5500, 6900, 9500, 25000, 21500];
+const HANDS_SPAN = 21500;
 // 타격감
 const STRIKE_T = 0.092;              // 가드에서 벽까지 내지르는 시간(초)
 const PULL_T = 0.120;                // 일반타 준비: 당기는 자세가 읽힌 뒤 빠르게 내지름
@@ -90,10 +89,11 @@ const lightPool = [0, 1].map(() => { const l = new THREE.PointLight(0xffffff, 0,
 // ------------------------------------------------------------------ 상태
 const SAVE_KEY = 'cheolgwon.v1';
 const G = {
-  v: 2, endure: 0, openedAt: 0, stageSpanScale: 1.5, owned: ['cement'], wall: 'cement',
+  v: 2, endure: 0, openedAt: 0, stageSpanScale: 1, owned: ['cement'], wall: 'cement',
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
   scrapEquips: 0,
+  scrapEquipsBySide: { L: 0, R: 0 },
   cleared: false,          // A4를 찢어 끝을 봤음 — 그 뒤로는 벽·손을 마음대로
   decals: {}, stuck: {}, old: {},
   seenHints: {}, seenSkill: {},
@@ -130,6 +130,12 @@ function load() {
     // 구형 저장에는 장착 횟수가 없다. 지금 철권이 남아 있으면 이미 첫 장착을 한 것으로 본다.
     const savedScrap = !!(s.arms && (s.arms.L?.scrap || s.arms.R?.scrap));
     G.scrapEquips = Number.isFinite(s.scrapEquips) ? Math.max(0, Math.floor(s.scrapEquips)) : (savedScrap ? 1 : 0);
+    // 첫 양손 모두 기본형. 한쪽만 끼운 뒤 이어하기도 반대쪽의 첫 장착을 보존한다.
+    G.scrapEquipsBySide = Object.fromEntries(['L', 'R'].map((side) => {
+      const count = s.scrapEquipsBySide?.[side];
+      return [side, Number.isFinite(count) ? Math.max(0, Math.floor(count)) :
+        (s.arms?.[side]?.scrap || G.scrapEquips >= 2 ? 1 : 0)];
+    }));
     for (const bag of [G.decals, G.stuck, G.old]) if (bag && typeof bag === 'object') { delete bag.traps; delete bag.slime; }
     // 예전 버전의 벽 타격 흔적 저장값도 함께 폐기한다.
     delete G.wallDamage;
@@ -143,8 +149,8 @@ function load() {
       G.v = 2;
     }
     if (!(G.openedAt >= 0) || G.openedAt > G.endure) G.openedAt = G.endure;
-    // 진행 중이던 목표는 유지하고, 다음 단계부터 길어진 맨손 구간에 맞춘다.
-    G.stageSpanScale = s.stageSpanScale === 1.5 ? 1.5 : 1;
+    // 기존 참을성·손 상태는 그대로 두고, 이어하기에도 짧아진 목표를 즉시 적용한다.
+    G.stageSpanScale = 1;
     G.cleared = !!s.cleared && G.owned.includes('paper');
     return true;
   } catch (e) { return false; }
@@ -842,6 +848,20 @@ function release(fist, now, auto) {
 // ------------------------------------------------------------------ 참을성
 function addEndure(n, bonus) {
   if (!(n > 0) || !round) return;
+  // 철권이 모두 닳으면 남은 목표도 끝난다. 마지막에 보너스로 뛰지 않고 소모에 맞춰 막대가 찬다.
+  if (round.scrapStart && !G.cleared) {
+    let total = 0, spent = 0;
+    for (const side of ['L', 'R']) {
+      const start = round.scrapStart[side];
+      total += start;
+      spent += Math.max(0, start - (arms[side].scrap?.lumpHP || 0));
+    }
+    if (total > 0) {
+      const k = clamp(spent / total, 0, 1);
+      const target = round.endureStart + Math.max(0, goal().to - round.endureStart) * k;
+      n = Math.max(n, target - G.endure);
+    }
+  }
   G.endure += n; round.endured += n; G.stats.total += n;
   const g = goal();
   ui.endure(g, bonus);
@@ -892,6 +912,8 @@ function blankRound() {
 function newRound() {
   cancelAllInputs();
   round = blankRound();
+  round.endureStart = G.endure;
+  round.scrapStart = Object.fromEntries(['L', 'R'].map((s) => [s, Math.max(0, arms[s].scrap?.lumpHP || 0)]));
   chain = [];
   for (const s of ['L', 'R']) resetArmMotion(s);
   hitstop = 0; rush = 0;
@@ -943,7 +965,7 @@ function endRound() {
     freshHands();
     round.fresh = true;
     setTimeout(() => sfx.play('restore', 0.8), 380);
-    G.stageSpanScale = 1.5;
+    G.stageSpanScale = 1;
     G.openedAt = G.endure;   // 새 벽(새 손)부터 막대를 다시 채움
   }
   save();
@@ -1358,6 +1380,15 @@ function restoreArm(a, snap) {
   }
 }
 
+// 양팔의 첫 장착은 각각 기본형. 이후 교체부터 기존 랜덤 종류를 사용한다.
+function nextScrapKind(side) {
+  const count = G.scrapEquipsBySide[side] || 0;
+  const kind = count === 0 ? 'base' : pickScrapKind(G.scrapEquips);
+  G.scrapEquipsBySide[side] = count + 1;
+  G.scrapEquips++;
+  return kind;
+}
+
 // UI에서 부르는 동작들
 const actions = {
   titleImpact() {
@@ -1439,9 +1470,8 @@ const actions = {
         // 앞팔 절반 이상이 없는 자리부터 원래 주먹까지 고철로 잇는다.
         a.setStump(Math.max(SCRAP_STUMP_I, prevI));
         a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
-        a.scrapObj = new Scrap(a, a.scrapSeed, pickScrapKind(G.scrapEquips));
+        a.scrapObj = new Scrap(a, a.scrapSeed, nextScrapKind(s));
         a.scrap = a.scrapObj.state;
-        G.scrapEquips = Math.max(0, Number.isFinite(G.scrapEquips) ? Math.floor(G.scrapEquips) : 0) + 1;
       }
       resetArmMotion(s);
       G.arms[s] = armSnapshot(a);
@@ -1465,10 +1495,9 @@ const actions = {
     if (a.I < SCRAP_STUMP_I) a.setStump(SCRAP_STUMP_I);
     if (a.scrapObj) a.scrapObj.dispose();
     a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
-    const kind = pickScrapKind(G.scrapEquips);
+    const kind = nextScrapKind(side);
     a.scrapObj = new Scrap(a, a.scrapSeed, kind);
     a.scrap = a.scrapObj.state;
-    G.scrapEquips = Math.max(0, Number.isFinite(G.scrapEquips) ? Math.floor(G.scrapEquips) : 0) + 1;
     resetArmMotion(side);
     G.arms[side] = armSnapshot(a);
     save(); sfx.equip(kind, side); return kind;
