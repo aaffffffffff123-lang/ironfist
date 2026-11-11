@@ -18,6 +18,7 @@
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png?v=forge1">
 <link rel="apple-touch-icon" href="apple-touch-icon.png?v=forge1">
 <link rel="preload" as="image" href="title-logo.webp?v=forge1">
+<link rel="preload" as="image" href="fist-dent.webp?v=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+JP:wght@900&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -197,7 +198,7 @@ body.playing #sound{display:none}
 @media (max-width:560px){#wallName{top:calc(54px + env(safe-area-inset-top));max-width:80vw}.playWallPanel,.handPanel{top:calc(98px + env(safe-area-inset-top))}}
 @media (max-width:380px){.shopBody{padding:16px 12px}.next{padding-left:12px;padding-right:12px}.arm{padding:10px 7px}.wall .sw{display:none}#endureBox .bar{width:78px}}
 </style>
-<link rel="stylesheet" href="forge-ui.css?v=8">
+<link rel="stylesheet" href="forge-ui.css?v=9">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -255,16 +256,16 @@ body.playing #sound{display:none}
 <section id="shop" role="dialog" aria-modal="true" aria-labelledby="shopTitle" aria-hidden="true" inert>
   <div class="sheet">
     <div class="shopBody">
-      <div class="res"><h2 id="shopTitle">이번 판 참을성</h2><span class="amount"><span id="rEarned">+0</span></span></div>
+      <div class="res"><h2 id="shopTitle">이번에 기른 참을성</h2><span class="amount"><span id="rEarned">+0</span></span></div>
       <div class="opened" id="opened" hidden><span class="sw" id="openedSw"></span><span class="ot"><span id="openedTitle"></span><b id="openedName"></b><small id="openedNote"></small></span></div>
       <div class="goal" id="goal">
-        <div class="goalHead"><span id="goalLabel">다음 벽</span><b id="goalName"></b><em id="goalLeft"></em></div>
+        <div class="goalHead"><span id="goalLabel">다음</span><b id="goalName"></b><em id="goalLeft"></em></div>
         <div class="goalBar"><i id="goalFill"></i></div>
       </div>
       <div class="sec"><h3>철권 장착</h3></div>
       <div class="arms" id="sArms"></div>
       <details class="wallPicker" id="wallPicker">
-        <summary><span><b id="sWallName">시멘트 벽</b><small id="sWallMult"></small></span></summary>
+        <summary><span><b id="sWallName">시멘트</b><small id="sWallMult"></small></span></summary>
         <div class="walls" id="sWalls"></div>
       </details>
     </div>
@@ -276,8 +277,8 @@ body.playing #sound{display:none}
 <div id="err"></div>
 
 <!-- ?v= : 고친 파일을 올렸을 때 예전 파일이 브라우저 캐시에서 섞여 나오지 않게 -->
-<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=8","./fx.js":"./fx.js?v=6","./sfx.js":"./sfx.js?v=17","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=12","./scrap.js":"./scrap.js?v=15","./ui.js":"./ui.js?v=16","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
-<script type="module" src="./game.js?v=33"></script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","./arm.js":"./arm.js?v=9","./fx.js":"./fx.js?v=6","./sfx.js":"./sfx.js?v=18","./punch.js":"./punch.js?v=2","./walls.js":"./walls.js?v=13","./scrap.js":"./scrap.js?v=16","./ui.js":"./ui.js?v=17","./room-env.js":"./room-env.js?v=2","./skills.js":"./skills.js?v=3"}}</script>
+<script type="module" src="./game.js?v=34"></script>
 </body>
 </html>
 

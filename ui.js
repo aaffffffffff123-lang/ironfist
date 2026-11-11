@@ -1,5 +1,5 @@
 // 철권 — 화면(제목·HUD·결과·다음 판 준비)
-import { SKILL_OF } from './skills.js';
+import { fistDent } from './fist-dent.js?v=1';
 const $ = (s, r = document) => r.querySelector(s);
 const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
 const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -82,7 +82,7 @@ export class UI {
     $('#btnFree').addEventListener('click', () => this.A.free());
     $('#btnRestart').addEventListener('click', () => { if (confirm('처음부터 다시?')) this.A.newGame(); });
     this.syncSound();
-    $('#ctrlHint').textContent = touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J / 마우스 좌·우 · 짧게: 타격 · 길게: 모아치기';
+    $('#ctrlHint').textContent = touch ? '화면 왼쪽·오른쪽으로 양손을 친다.\n짧게 누르면 한 대. 길게 눌렀다 떼면 세게.' : 'F · J / 마우스 왼쪽·오른쪽\n짧게 누르면 한 대. 길게 눌렀다 떼면 세게.';
   }
   syncSound() { this.el.sound.classList.toggle('off', this.A.isMuted()); }
   ready() {
@@ -170,7 +170,7 @@ export class UI {
     const list = this.el.playWalls;
     list.innerHTML = '';
     for (const w of this.WALLS) {
-      if (!this.G.owned.includes(w.id)) continue;
+      if (w.paper || !this.G.owned.includes(w.id)) continue;
       const cur = this.G.wall === w.id;
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -205,7 +205,6 @@ export class UI {
   }
   hint(id) {
     const txt = {
-      controls: touch ? '짧게: 타격 · 길게: 모아치기' : 'F · J · 짧게: 타격 · 길게: 모아치기',
       pinned: '같은 쪽을 한 번 터치',
       free: '벽 · 손은 위에서 마음대로 바꿀 수 있음',
       freeHands: '새 손은 오른쪽 위 손 바꾸기에서',
@@ -233,9 +232,9 @@ export class UI {
     if (w) {
       $('#openedSw').style.background = SWATCH[w.id];
       $('#openedSw').style.display = '';
-      $('#openedTitle').textContent = w.paper ? '마지막' : '새 벽';
+      $('#openedTitle').textContent = w.paper ? '마지막' : '열림';
       $('#openedName').textContent = w.name;
-      $('#openedNote').textContent = w.paper ? '양손에 철권을 달고 시작' : SKILL_OF[w.id]?.name ? `모아치기 · ${SKILL_OF[w.id].name}` : '';
+      $('#openedNote').textContent = w.paper ? '양손에 철권을 달고 시작' : '';
       op.hidden = false;
     } else if (round.fresh) {
       $('#openedSw').style.display = 'none';
@@ -258,9 +257,9 @@ export class UI {
     // 다음 목표까지 막대
     const g = A.goal();
     const k = Math.max(0, Math.min(1, (g.endure - g.from) / Math.max(1, g.to - g.from)));
-    $('#goalLabel').textContent = g.kind === 'wall' ? '다음 벽' : '새 손까지';
-    $('#goalName').textContent = g.kind === 'wall' ? g.wall.name : '';
-    $('#goalLeft').textContent = k >= 1 ? '' : `${fmt(g.to - g.endure)} 더`;
+    $('#goalLabel').textContent = g.kind === 'wall' ? (g.wall.paper ? '' : '다음') : '새 손까지';
+    $('#goalName').textContent = g.kind === 'wall' && !g.wall.paper ? g.wall.name : '';
+    $('#goalLeft').textContent = k >= 1 ? '' : `참을성 ${fmt(g.to - g.endure)} 모자람`;
     const key = g.kind + ':' + g.from;
     setBar($('#goalFill'), k, key !== this._shopKey);
     this._shopKey = key;
@@ -268,40 +267,46 @@ export class UI {
     // A4가 열린 뒤로는 채울 막대가 없음
     $('#goal').hidden = g.kind === 'hands' && G.owned.includes('paper');
     // 팔마다 직접 철권을 장착한다(공짜)
-    const arms = $('#sArms'); arms.innerHTML = '';
+    const arms = $('#sArms');
     for (const side of ['L', 'R']) {
       const info = A.armInfo(side), label = side === 'L' ? '왼팔' : '오른팔';
+      const state = info.scrap ? 'scrap' : info.fist ? 'flesh' : 'empty';
+      const previous = arms.querySelector(`[data-side="${side}"]`);
+      if (previous?.dataset.state === state) continue;
       const card = document.createElement('div');
+      card.dataset.state = state;
       card.className = 'arm' + (info.fist ? ' ready' : '');
       card.dataset.side = side;
-      const primary = info.fist ? '' :
-        '<button class="btn sub" data-act="scrap"><span>철권 장착</span></button>';
-      card.innerHTML = `<div class="armHead"><b>${label}</b></div>${primary ? `<div class="armBtns">${primary}</div>` : ''}`;
+      const primary = info.scrap ? fistDent(side) : info.fist ? '<span class="fleshReady">맨손</span>' :
+        `<button class="btn sub" data-act="scrap" aria-label="${label} 철권 장착"><span>철권 장착</span></button>`;
+      card.innerHTML = `<div class="armHead"><b>${label}</b></div><div class="armBtns">${primary}</div>`;
       card.querySelector('[data-act=scrap]')?.addEventListener('click', () => {
         const kind = A.scrap(side);
         if (!kind) this.deny();
         this.renderShop();
         if (kind) this.mountImpact(side);
       });
-      arms.appendChild(card);
+      if (previous) previous.replaceWith(card);
+      else arms.appendChild(card);
     }
     // 벽은 지금 고른 것만 먼저 보여 주고, 목록은 필요할 때 펼친다.
     const selected = this.WALLS.find((w) => w.id === G.wall);
+    $('#wallPicker').hidden = !!selected?.paper;
     $('#sWallName').textContent = selected ? selected.name : '';
-    $('#sWallMult').textContent = selected ? (selected.paper ? '양손에 철권을 달고 시작' : `모아치기 · ${SKILL_OF[selected.id]?.name || ''}`) : '';
+    $('#sWallMult').textContent = selected?.paper ? '양손에 철권을 달고 시작' : '';
     const next = A.nextWall ? A.nextWall() : null;
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
+      if (w.paper) continue;
       const owned = G.owned.includes(w.id), cur = G.wall === w.id;
       const isNext = !owned && next && next.id === w.id;
-      const sk = SKILL_OF[w.id];
       const row = document.createElement('button');
       row.className = 'wall' + (cur ? ' cur' : '') + (owned ? ' owned' : ' locked');
       row.disabled = cur || !owned;
       const right = cur ? '<i>선택됨</i>' : owned ? '<i class="o">선택</i>' : '<em>잠김</em>';
-      const note = isNext ? `참을성 ${fmt(Math.max(0, g.to - g.endure))} 더` : '';
+      const note = isNext ? `참을성 ${fmt(Math.max(0, g.to - g.endure))} 모자람` : '';
       row.innerHTML = `<span class="sw" style="background:${SWATCH[w.id]}"></span>
-        <span class="wt"><b>${w.name}</b><span class="sk">${sk ? sk.name : ''}</span></span>
+        <span class="wt"><b>${w.name}</b></span>
         <span class="wp">${right}${note ? '<small>' + note + '</small>' : ''}</span>`;
       row.addEventListener('click', () => {
         if (cur || !owned) return;
@@ -320,8 +325,11 @@ export class UI {
     card.classList.remove('mounting'); sheet.classList.remove('mounting');
     void card.offsetWidth;
     card.classList.add('mounting'); sheet.classList.add('mounting');
-    clearTimeout(this._mountTimer);
-    this._mountTimer = setTimeout(() => { card.classList.remove('mounting'); sheet.classList.remove('mounting'); }, 760);
+    this._mountTimers ||= {};
+    clearTimeout(this._mountTimers[side]);
+    clearTimeout(this._sheetMountTimer);
+    this._mountTimers[side] = setTimeout(() => card.classList.remove('mounting'), 760);
+    this._sheetMountTimer = setTimeout(() => sheet.classList.remove('mounting'), 760);
   }
   deny() { const c = $('#sArms'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake'); }
   toast(t) { const h = this.el.hint; h.textContent = t; h.classList.add('show', 'top'); clearTimeout(this._ht); this._ht = setTimeout(() => h.classList.remove('show', 'top'), 2400); }

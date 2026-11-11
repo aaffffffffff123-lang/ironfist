@@ -1,7 +1,7 @@
 // 철권 — 메인
 import * as THREE from 'three';
 import { RoomEnvironment } from './room-env.js';
-import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT } from './arm.js';
+import { loadArmAssets, initAnatomy, Arm, W as WT, SEG, ANAT, SCRAP_STUMP_I } from './arm.js';
 import { WALLS, createWall, hitter, PAIN_TOP } from './walls.js';
 import { FX, PUFF_SCALE } from './fx.js';
 import { SFX } from './sfx.js';
@@ -90,7 +90,7 @@ const lightPool = [0, 1].map(() => { const l = new THREE.PointLight(0xffffff, 0,
 // ------------------------------------------------------------------ 상태
 const SAVE_KEY = 'cheolgwon.v1';
 const G = {
-  v: 2, endure: 0, openedAt: 0, owned: ['cement'], wall: 'cement',
+  v: 2, endure: 0, openedAt: 0, stageSpanScale: 1.5, owned: ['cement'], wall: 'cement',
   stats: { rounds: 0, total: 0 },
   arms: { L: { kind: 'flesh' }, R: { kind: 'flesh' } },
   scrapEquips: 0,
@@ -143,6 +143,8 @@ function load() {
       G.v = 2;
     }
     if (!(G.openedAt >= 0) || G.openedAt > G.endure) G.openedAt = G.endure;
+    // 진행 중이던 목표는 유지하고, 다음 단계부터 길어진 맨손 구간에 맞춘다.
+    G.stageSpanScale = s.stageSpanScale === 1.5 ? 1.5 : 1;
     G.cleared = !!s.cleared && G.owned.includes('paper');
     return true;
   } catch (e) { return false; }
@@ -190,7 +192,7 @@ function poses(side, armObj) {
     q0 = mirrorQ(q0); q1 = mirrorQ(q1);
   }
   const D0 = AX_Z.clone().applyQuaternion(q0); // 가드의 손목→주먹 방향
-  // 짧아진 그루터기에 단 철권: 가드에서도 팔을 그만큼 앞으로 내밀어 주먹이 늘 같은 자리에 보이게
+  // 남은 팔 길이는 고철 축으로 복원한다. 가드 자세의 원점은 양팔 동일하다.
   if (shiftR > 1e-5) p0.addScaledVector(D0, shiftR);
   return { p0, q0, p1, q1, D0, D1: s < 0 ? new THREE.Vector3(-D1.x, D1.y, D1.z) : D1, contact };
 }
@@ -849,7 +851,7 @@ function nextWall() { return WALLS.find((w) => !G.owned.includes(w.id)) || null;
 // 지금 채우는 막대: 가장 높은 벽을 연 뒤로 다음 벽까지, 벽이 다 열린 뒤로는 새 손까지
 function goal() {
   const nw = nextWall();
-  const span = nw ? OPEN_SPAN[WALLS.indexOf(nw) - 1] : HANDS_SPAN;
+  const span = (nw ? OPEN_SPAN[WALLS.indexOf(nw) - 1] : HANDS_SPAN) * G.stageSpanScale;
   return { kind: nw ? 'wall' : 'hands', wall: nw, from: G.openedAt, to: G.openedAt + span, endure: G.endure };
 }
 // 벽에 익숙해진 정도(0 갓 연 벽 ~ 1 넘어선 벽) — 칠수록 벽 앞에서 주먹이 덜 떨림. 새 손이 생기면 다시 떨림
@@ -904,7 +906,7 @@ function checkRoundEnd() {
   const L = arms.L, R = arms.R;
   // 다 끝난 뒤엔 판이 끝나지 않음 — 손은 위 '손 바꾸기'에서 마음대로
   if (G.cleared) { if (!L.hasFist() && !R.hasFist()) showHint('freeHands'); return; }
-  if (!L.hasFist() && !R.hasFist()) {
+  if (L.needsScrap() && R.needsScrap()) {
     round.ended = true; round.endT = time;
     cancelAllInputs();
     // 판이 끝나면 남은 입력·감전 연타를 멈추고 팔만 가드로 돌아옴.
@@ -943,6 +945,7 @@ function endRound() {
       round.fresh = true;
       setTimeout(() => sfx.play('restore', 0.8), 380);
     }
+    G.stageSpanScale = 1.5;
     G.openedAt = G.endure;   // 새 벽(새 손)부터 막대를 다시 채움
   }
   save();
@@ -1341,8 +1344,9 @@ function restoreArm(a, snap) {
   a.reset();
   if (!snap || !(snap.I > 0)) return;
   a.setStump(snap.I);
-  // 덩어리가 남은 철권만 다시 닮(쇠로 메운 팔뚝은 없음). 덩어리가 다 떨어졌던 팔은 그루터기만
+  // 덩어리가 남으면 현재 살 길이에 맞춰 고철 팔뚝까지 다시 잇는다.
   if (snap.scrap && snap.scrap.lump > 0) {
+    if (a.I < SCRAP_STUMP_I) a.setStump(SCRAP_STUMP_I);
     a.scrapSeed = snap.scrap.seed;
     const kind = SCRAP_KINDS.includes(snap.scrap.kind) ? snap.scrap.kind : 'base';
     a.scrapObj = new Scrap(a, snap.scrap.seed, kind);
@@ -1377,8 +1381,7 @@ const actions = {
     ui.endure(goal());
     render();
     ui.hidePanels(); ui.hud(true);
-    if (!G.seenHints.controls) showHint('controls');
-    else if (G.cleared) showHint('free');
+    if (G.cleared) showHint('free');
     return true;
   },
   // 끝 화면 → 계속 치기
@@ -1431,8 +1434,8 @@ const actions = {
       a.scrapObj = null;
       a.reset();
       if (kind === 'scrap') {
-        // 손이 있으면 손목까지 떼고, 이미 짧아진 팔이면 그 그루터기 끝에 바로 닮
-        a.setStump(Math.max(0.5, prevI));
+        // 앞팔 절반 이상이 없는 자리부터 원래 주먹까지 고철로 잇는다.
+        a.setStump(Math.max(SCRAP_STUMP_I, prevI));
         a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
         a.scrapObj = new Scrap(a, a.scrapSeed, pickScrapKind(G.scrapEquips));
         a.scrap = a.scrapObj.state;
@@ -1457,6 +1460,7 @@ const actions = {
   scrap(side) {
     const a = arms[side];
     if (a.hasFist()) return false;
+    if (a.I < SCRAP_STUMP_I) a.setStump(SCRAP_STUMP_I);
     if (a.scrapObj) a.scrapObj.dispose();
     a.scrapSeed = Math.floor(Math.random() * 1e6) + 1;
     const kind = pickScrapKind(G.scrapEquips);
@@ -1470,7 +1474,7 @@ const actions = {
   // A4 앞에서는 양손 다 단 채로 시작
   canStart() {
     if (!G.cleared && G.wall === 'paper') return arms.L.hasFist() && arms.R.hasFist();
-    return arms.L.hasFist() || arms.R.hasFist();
+    return !arms.L.needsScrap() || !arms.R.needsScrap();
   },
   goal: () => goal(),
   nextWall: () => nextWall(),

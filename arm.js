@@ -912,6 +912,7 @@ const smooth01 = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
 // 뭉개짐이 진행되는 자리(바인드 z)
 const FIST_FRONT = 0.099;   // 주먹 앞면
 const NO_CRUSH = 0.16;      // 아직 안 뭉개짐
+export const SCRAP_STUMP_I = 0.75; // 손목~팔꿈치 사이의 절반까지 닳으면 철권 장착
 const WRIST_Z = 0.004;      // 손목
 const ELBOW_Z = -0.262;     // 팔꿈치 바로 앞
 const CRUSH_I0 = 0.30;      // 이 손실부터 손 앞면이 짓이겨지기 시작
@@ -1220,18 +1221,18 @@ export class Arm {
   get cutZ() { return this.crushZ; }   // 고철·벽이 그루터기 끝으로 씀
   hasFlesh() { return this.I < 0.5; }
   hasFist() { return this.I < 0.5 || (this.scrap && this.scrap.lumpHP > 0); }
+  needsScrap() { return !this.hasFist() && this.I >= SCRAP_STUMP_I; }
   canPunch() { return this.I < 0.995 || (this.scrap && (this.scrap.lumpHP > 0 || this.scrap.pipeHP > 0)); }
   // 주먹 앞면(타격면)이 팔 원점(손목)에서 +Z로 얼마나 앞에 있는지
-  // 철권은 지금 그루터기 끝에 붙어 있어서(쇠로 팔뚝을 새로 메우지 않음) 살이 짧아진 만큼 타격면도 가까워짐
+  // 철권 축이 사라진 팔뚝을 메우므로, 살 길이와 무관하게 원래 주먹 자리에서 친다.
   reach() {
     if (this.I < 0.5) { const f = Math.min(0.097, this.crushZ + LUMP_T * 0.85); return f > 0 ? f * this.handScale.z : f; }
-    const shift = this.scrapObj && this.scrap ? this.scrapObj.mountShift : 0;
-    if (this.scrap && this.scrap.lumpHP > 0) return 0.097 + shift - (this.scrapObj ? this.scrapObj.frontLoss : 0);
-    if (this.scrap && this.scrap.pipeHP > 0) return shift;
+    if (this.scrap && this.scrap.lumpHP > 0) return 0.097 - (this.scrapObj ? this.scrapObj.frontLoss : 0);
+    if (this.scrap && this.scrap.pipeHP > 0) return 0;
     return this.crushZ + LUMP_T * 0.8;
   }
-  // 가드 자세에서 팔을 팔 방향으로 내미는 거리 — 짧아진 그루터기에 단 철권도 늘 주먹 자리에 보이게
-  restShift() { return this.I >= 0.5 && this.scrap && this.scrap.lumpHP > 0 && this.scrapObj ? -this.scrapObj.mountShift : 0; }
+  // 고철 축이 길이를 복원하므로 팔 전체를 앞으로 미는 보정은 없다.
+  restShift() { return 0; }
   // 부러진 손등뼈 비율(0~1) — 클수록 맞을 때 손이 깊이 우그러짐
   brokenK() { let n = 0; for (const m of this.mc) if (m.broken) n++; return n / 4; }
   squashZ() { return this.I < 0.5 ? 0.1 + 0.16 * this.brokenK() : 0.1; }

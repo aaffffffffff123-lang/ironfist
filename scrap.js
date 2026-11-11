@@ -217,7 +217,7 @@ function wireTendril(rng, angle, len, turns) {
 const MOUNT_Z = 0.004;
 
 export class Scrap {
-  // opts.fill: 그루터기부터 원래 손목까지 쇠파이프로 메운 예전 모양(가시벽에 꿰인 남의 철권 장식용)
+  // opts.fill: 가시벽 장식은 부서져도 팔뚝 뼈대를 남긴다.
   constructor(arm, seed, kind = 'base', opts = {}) {
     if (!CACHE) CACHE = buildCache();
     this.arm = arm;
@@ -228,10 +228,10 @@ export class Scrap {
     const requestedPreview = new URLSearchParams(location.search).get('scrapPreview');
     const previewKind = SCRAP_KINDS.includes(requestedPreview) ? requestedPreview : SCRAP_KINDS.includes(kind) ? kind : 'base';
     this.kind = this.previewKind = previewKind;
-    // 철권은 늘 손목 자리에 붙이는 크기로 만든다. 갈려서 짧아진 팔뚝을 쇠로 새로 메우지 않고
-    // 철권째 그루터기 끝으로 옮겨 붙이며, 팔이 그만큼 앞으로 나와 주먹 자리는 그대로 보인다(arm.reach·restShift).
+    // 없어진 팔뚝 길이를 실제 고철 축으로 메운다. 주먹은 원래 손목 앞에 고정하고
+    // 장착점만 남은 살 끝에 맞춰서, 팔 전체를 앞으로 밀어 보정하지 않는다.
     this.fill = !!opts.fill;
-    this.mountZ = this.fill ? Math.min(arm.cutZ, 0.006) : MOUNT_Z;
+    this.mountZ = Math.min(arm.cutZ, MOUNT_Z);
     const stumpZ = this.mountZ;
     const wristZ = 0.004;
     const pipeLen = wristZ - stumpZ + 0.02;
@@ -249,17 +249,23 @@ export class Scrap {
       this.pipe = pipe; this.pipeInner = inner;
       pipeHP = fullPipeHP;
     }
+    // 연결부가 더 닳아도 주먹을 당기지 않고, 안쪽 슬리브만 뒤로 연장한다.
+    this.socket = new THREE.Group(); this.group.add(this.socket);
+    this.stumpSleeve = new THREE.Mesh(C.pipeUnit, M.galv);
+    this.stumpSleeve.rotation.x = Math.PI / 2;
+    this.stumpSleeve.castShadow = true; this.stumpSleeve.receiveShadow = true;
+    this.group.add(this.stumpSleeve);
     // 그루터기 묶는 호스 밴드·철사·테이프
     for (let k = 0; k < 2; k++) {
       const band = new THREE.Mesh(tapeBand(rng, 0.0315 + k * 0.001, 0.014), M.tape);
       band.rotation.x = Math.PI / 2; band.position.set(0, -0.001, stumpZ - 0.012 - k * 0.012);
       band.scale.set(1.0, 1, 0.72);
-      this.group.add(band);
+      this.socket.add(band);
     }
     const clamp = new THREE.Mesh(tapeBand(rng, 0.033, 0.009), M.galv);
     clamp.rotation.x = Math.PI / 2; clamp.position.set(0, -0.001, stumpZ - 0.02); clamp.scale.set(1, 1, 0.72);
-    this.group.add(clamp);
-    const screw = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.007, 0.012), M.galv); screw.position.set(0.0, 0.026, stumpZ - 0.02); this.group.add(screw);
+    this.socket.add(clamp);
+    const screw = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.007, 0.012), M.galv); screw.position.set(0.0, 0.026, stumpZ - 0.02); this.socket.add(screw);
     // 덩어리
     this.parts = [];
     const lump = new THREE.Group();
@@ -634,7 +640,7 @@ export class Scrap {
         this.group.add(r);
       }
     }
-    this.state = { lumpHP: 140, pipeHP, partsLeft: this.parts.length };
+    this.state = { lumpHP: 140, pipeHP: this.fill ? pipeHP : 0, partsLeft: this.parts.length };
     this.totalLump = 140;
     this.heat = 0;
     // 달아오른 쇳덩이 빛 — 가장자리로 갈수록 흐려지는 공(납작한 원판처럼 안 보이게)
@@ -676,9 +682,19 @@ export class Scrap {
   }
   // 앞쪽 부품이 떨어져 나가 타격면이 뒤로 물러난 거리 — 남은 고철이 실제로 벽에 닿게
   get frontLoss() { return Math.max(0, Math.min(0.06, (this.front0 || 0) - (this.frontNow || 0))); }
-  // 지금 그루터기 끝이 붙인 기준 자리보다 얼마나 뒤(팔꿈치 쪽)에 있는지. 철권 전체가 그만큼 따라 들어감
-  get mountShift() { return this.fill ? 0 : Math.min(this.arm.cutZ, MOUNT_Z) - this.mountZ; }
-  _syncMount() { this.group.position.z = this.mountShift; }
+  // 주먹 위치는 고정. 부착 띠와 슬리브만 손상된 살 끝을 따라간다.
+  _syncMount() {
+    if (!this.socket || !this.stumpSleeve) return;
+    const cut = Math.min(this.arm.cutZ, this.mountZ);
+    const recession = this.mountZ - cut;
+    this.socket.position.z = -recession;
+    this.stumpSleeve.visible = recession > 0.001;
+    if (this.stumpSleeve.visible) {
+      const back = cut - 0.018, front = this.mountZ + 0.012;
+      this.stumpSleeve.scale.set(0.94, front - back, 0.94);
+      this.stumpSleeve.position.z = (front + back) / 2;
+    }
+  }
   // 덩어리가 다 떨어지면 남은 뼈대·테이프·쇠막대도 같이 떨어져 나가 그루터기만 남음(허공에 묶음만 떠 있지 않게)
   shed(fx) {
     const loose = [];
@@ -689,6 +705,7 @@ export class Scrap {
       else if (o.parent) o.parent.remove(o);
     }
     this.pipe = null; this.pipeInner = null; this.wraps = [];
+    this.socket = null; this.stumpSleeve = null;
   }
   // 맞을 때 부품이 떨어져 나감. 떨어진 개수 반환
   onDamage(hit, fx, wall, contact) {

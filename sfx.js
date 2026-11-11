@@ -1063,12 +1063,11 @@ export class SFX {
     this._titleImpactPlayed = true;
     this.play('titleClang', 1.18, { jitter: 0.008, verb: false });
   }
-  // 장착 프레스는 터무니없이 강하고, 공개된 철권만 뒤늦게 초라한 소리를 낸다.
+  // 쇠판을 한 번 찍는 순간에 맞춘 충격. 장착한 철권의 잔소리만 뒤에 남는다.
   equip(kind, side = 'L') {
     const pan = side === 'L' ? -0.32 : 0.32;
     this.play('mountLock', 0.55, { pan, rate: 1, jitter: 0.015, verbAmt: 0.22 });
     this.play('titleClang', 1.18, { pan, delay: 0.055, rate: 1, jitter: 0.008, verb: false });
-    this.play('titleClang', 1.06, { pan, delay: 0.3, rate: 1, jitter: 0.008, verb: false });
     const cheap = {
       base: ['clank', 0.18, 0.86],
       wire: ['wire', 0.24, 1.12],
