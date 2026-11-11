@@ -739,7 +739,7 @@ function showEnding() {
   cancelAllInputs();
   skillFx?.clear();
   ui.hud(false);
-  ui.showEnding({ rounds: G.stats.rounds || 0, scrap: G.scrapEquips || 0, endure: G.stats.total || 0 });
+  ui.showEnding();
 }
 // 다 끝난 뒤에는 판이 끝나지 않아 팔 상태를 수시로 저장
 function saveFree() {
@@ -939,12 +939,10 @@ function endRound() {
       setWall(g.wall.id);
       round.opened = g.wall.id;
     }
-    // A4는 철권을 단 채로 마주함 — 새 손을 주지 않고 장착 화면에서 양손에 철권을 닮
-    if (!(g.kind === 'wall' && g.wall.paper)) {
-      freshHands();
-      round.fresh = true;
-      setTimeout(() => sfx.play('restore', 0.8), 380);
-    }
+    // A4도 다른 벽처럼 새 맨손으로 마주함(철권 장착 없음)
+    freshHands();
+    round.fresh = true;
+    setTimeout(() => sfx.play('restore', 0.8), 380);
     G.stageSpanScale = 1.5;
     G.openedAt = G.endure;   // 새 벽(새 손)부터 막대를 다시 채움
   }
@@ -1236,7 +1234,7 @@ async function boot() {
   resize();
   let hadSave = load();
   if (TEST) {
-    // 시험용: 저장은 그대로 두고, 벽을 다 연 채 A4 앞에서 양손 철권으로 시작
+    // 시험용: 저장은 그대로 두고, 벽을 다 연 채 A4 앞에서 양손 철권으로 시작(시험 때만 A4에 철권 허용)
     noSave = true; hadSave = true;
     G.owned = WALLS.map((w) => w.id); G.wall = 'paper'; G.cleared = false; G.openedAt = G.endure;
     G.arms = { L: { I: 0.5, scrap: { lump: 140, pipe: 0, seed: 11, kind: 'base' } }, R: { I: 0.5, scrap: { lump: 140, pipe: 0, seed: 23, kind: 'wire' } } };
@@ -1258,6 +1256,8 @@ async function boot() {
   setWall(G.owned.includes(G.wall) ? G.wall : 'cement');
   // 저장된 팔 상태 복원
   for (const s of ['L', 'R']) restoreArm(arms[s], G.arms[s]);
+  // 마지막 A4는 맨주먹: 예전 저장이 철권·다친 손인 채 A4 앞이면 새 맨손으로
+  if (!TEST && !G.cleared && G.wall === 'paper' && (arms.L.I > 0 || arms.R.I > 0 || arms.L.scrapObj || arms.R.scrapObj)) freshHands();
   warmup();
   ui = new UI({ G, WALLS, hadSave, actions });
   round = blankRound();
@@ -1366,6 +1366,8 @@ const actions = {
   },
   start() {
     sfx.unlock();
+    // 마지막 A4는 맨주먹으로 친다 — 예전 저장으로 철권·다친 손인 채 A4 앞에 와 있어도 새 맨손으로 바꿈
+    if (!TEST && !G.cleared && G.wall === 'paper' && (arms.L.I > 0 || arms.R.I > 0 || arms.L.scrapObj || arms.R.scrapObj)) { freshHands(); save(); }
     // 다 끝난 뒤엔 장착 화면 없이 바로(손은 위에서 바꿈)
     if (!G.cleared && !actions.canStart()) {
       mode = 'shop';
@@ -1471,7 +1473,7 @@ const actions = {
     G.arms[side] = armSnapshot(a);
     save(); sfx.equip(kind, side); return kind;
   },
-  // A4 앞에서는 양손 다 단 채로 시작
+  // A4 앞에서는 양손 맨주먹으로 시작(start 에서 새 맨손으로 맞춰 줌)
   canStart() {
     if (!G.cleared && G.wall === 'paper') return arms.L.hasFist() && arms.R.hasFist();
     return !arms.L.needsScrap() || !arms.R.needsScrap();

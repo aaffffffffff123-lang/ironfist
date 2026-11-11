@@ -1219,6 +1219,8 @@ export class Arm {
     for (const m of this.mc) if (m.shard) { m.shard.e = m.shard.eT; m.shard.v = 0; this._placeShard(m.shard); }
   }
   get cutZ() { return this.crushZ; }   // 고철·벽이 그루터기 끝으로 씀
+  // z 위치에서 팔 단면(중심 x·y, 반폭 hw, 반높이 hh) — 철권 부착 띠가 팔 굵기에 맞게 감기도록
+  section(z) { return sectionAt(z); }
   hasFlesh() { return this.I < 0.5; }
   hasFist() { return this.I < 0.5 || (this.scrap && this.scrap.lumpHP > 0); }
   needsScrap() { return !this.hasFist() && this.I >= SCRAP_STUMP_I; }

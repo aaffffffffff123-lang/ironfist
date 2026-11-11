@@ -137,10 +137,7 @@ export class UI {
     this.el.handBtn.setAttribute('aria-expanded', 'false');
   }
   // 끝 화면
-  showEnding(st) {
-    $('#eRounds').textContent = fmt(st.rounds) + '판';
-    $('#eScrap').textContent = fmt(st.scrap) + '개';
-    $('#eEndure').textContent = fmt(st.endure);
+  showEnding() {
     clearTimeout(this._ht);
     this.el.hint.classList.remove('show', 'top');
     const e = this.el.ending;
@@ -234,7 +231,7 @@ export class UI {
       $('#openedSw').style.display = '';
       $('#openedTitle').textContent = w.paper ? '마지막' : '열림';
       $('#openedName').textContent = w.name;
-      $('#openedNote').textContent = w.paper ? '양손에 철권을 달고 시작' : '';
+      $('#openedNote').textContent = w.paper ? '맨주먹으로 시작' : '';
       op.hidden = false;
     } else if (round.fresh) {
       $('#openedSw').style.display = 'none';
@@ -293,7 +290,7 @@ export class UI {
     const selected = this.WALLS.find((w) => w.id === G.wall);
     $('#wallPicker').hidden = !!selected?.paper;
     $('#sWallName').textContent = selected ? selected.name : '';
-    $('#sWallMult').textContent = selected?.paper ? '양손에 철권을 달고 시작' : '';
+    $('#sWallMult').textContent = selected?.paper ? '맨주먹으로 시작' : '';
     const next = A.nextWall ? A.nextWall() : null;
     const list = $('#sWalls'); list.innerHTML = '';
     for (const w of this.WALLS) {
